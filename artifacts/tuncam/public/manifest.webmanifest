@@ -1,0 +1,13 @@
+{
+  "name": "TUNCAM Field Capture",
+  "short_name": "TUNCAM",
+  "description": "Offline tuna sample capture and grading instrument.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#edf6fb",
+  "theme_color": "#1684dd",
+  "orientation": "landscape",
+  "icons": [
+    { "src": "/tuncam-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

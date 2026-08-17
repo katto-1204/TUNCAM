@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "TUNCAM"
+description = "An offline-first Progressive Web App for standardized tuna sample capture, immediate expert grading, session tallying, and local dataset manifest export."
+version = "1.0.0"
+id = "artifacts/tuncam"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18711
+
+[services.development]
+run = "pnpm --filter @workspace/tuncam run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/tuncam", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/tuncam/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18711"
+BASE_PATH = "/"
