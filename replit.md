@@ -12,6 +12,7 @@ Offline-first Progressive Web App for standardized tuna sample capture, immediat
 - Required env: `DATABASE_URL` — Postgres connection string
 - `pnpm --filter @workspace/tuncam run typecheck` — check the TUNCAM frontend
 - `PORT=18711 BASE_PATH=/ pnpm --filter @workspace/tuncam run build` — production build check
+- Vercel deploys the TUNCAM static build from the GitHub repo: install with pnpm, `pnpm --filter @workspace/tuncam run build`, output `artifacts/tuncam/dist/public`
 
 ## Stack
 
