@@ -32,14 +32,15 @@ Offline-first Progressive Web App for standardized tuna sample capture, immediat
 
 ## Architecture decisions
 
-- The first build is frontend-only and offline-first: session records persist in local browser storage instead of a cloud API.
-- Camera capture uses browser media APIs, with explicit no-camera and permission-denied states rather than fake preview data.
+- The first build is frontend-only and offline-first: session metadata and JPEG blobs persist in IndexedDB instead of a cloud API.
+- Camera connection and capture are both explicit/manual. The app never auto-starts the camera or auto-captures a frame.
 - The capture-to-grade loop is blocking by design: every captured sample must receive Grade A, B, C, or Invalid before the next action.
+- End-of-session export packs `Date/SampleType/Grade/` folders plus images into a ZIP, with CSV/JSON manifests included and also downloadable separately.
 - Browser capabilities such as folder access, wake lock, storage estimates, and install prompts are detected at runtime and get a graceful fallback when unavailable.
 
 ## Product
 
-TUNCAM gives a field operator one tablet-friendly workspace for configuring a session, selecting a sample type, framing and capturing tuna samples, assigning an expert grade, reviewing/removing local captures, tracking progress toward the 800-image target, and exporting a local CSV or JSON manifest for dataset auditing.
+TUNCAM gives a field operator one tablet-friendly workspace for configuring a session, selecting a sample type, framing and manually capturing tuna samples, assigning an expert grade, reviewing/removing local captures, tracking progress toward the 800-image target, and downloading a local dataset ZIP (folders + images) plus CSV/JSON manifests.
 
 ## User preferences
 

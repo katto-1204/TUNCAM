@@ -4,8 +4,8 @@
   "description": "Offline tuna sample capture and grading instrument.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#edf6fb",
-  "theme_color": "#1684dd",
+  "background_color": "#eef2fc",
+  "theme_color": "#355bd5",
   "orientation": "landscape",
   "icons": [
     { "src": "/tuncam-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
