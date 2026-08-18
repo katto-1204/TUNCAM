@@ -67,16 +67,54 @@ export function recordFolder(record: Pick<RecordItem, 'date' | 'sampleType' | 'g
 }
 
 export function recordPath(record: RecordItem) {
-  return `${recordFolder(record)}/${record.filename}`;
+  return `${recordFolder(record)}/${jpegFilename(record)}`;
 }
 
 export function buildFilename(site: string, sampleType: SampleType, grade: Grade, sequence: number, date = today()) {
   return `${date}-${slug(site)}-${sampleCode(sampleType)}-${grade}-${String(sequence).padStart(3, '0')}.jpg`;
 }
 
+export function jpegFilename(record: Pick<RecordItem, 'date' | 'site' | 'sampleType' | 'grade' | 'sequence'>) {
+  return buildFilename(record.site, record.sampleType, record.grade, record.sequence, record.date);
+}
+
+export function photoZipPath(record: RecordItem) {
+  return `PHOTOS/${jpegFilename(record)}`;
+}
+
+export function exampleFilename(site: string, date = today()) {
+  return buildFilename(site || 'Bangkerohan, General Santos City', 'Sashibo Core', 'A', 1, date);
+}
+
+export function datasetZipName(site: string, date = today()) {
+  return `TUNCAM-${date}-${slug(site)}.zip`;
+}
+
+export function exportGuideText(sampleName: string) {
+  return [
+    'TUNCAM photo pack',
+    '',
+    'Open the PHOTOS folder. Those are the sample images.',
+    '',
+    'Each photo is named:',
+    '  date-site-sampletypecode-grade-sequence.jpg',
+    `Example: ${sampleName}`,
+    '',
+    'How to open on Windows:',
+    '1. Right-click the ZIP > Extract All.',
+    '2. Open the extracted folder, then open PHOTOS.',
+    '3. Double-click a JPG file to view it.',
+    '',
+    'Windows may hide the .jpg extension. The Type column should still say JPG File.',
+    'session-manifest.csv is a spreadsheet of capture details, not a photo.',
+    '',
+    'Codes: sc = Sashibo Core, tc = Tail-Cut. Grade is A, B, C, or Invalid.',
+  ].join('\n');
+}
+
 export function buildManifestRows(records: RecordItem[], settings: SessionSettings) {
   return records.map((record) => ({
-    filename: record.filename,
+    filename: jpegFilename(record),
     date: record.date,
     site: record.site,
     sample_type: record.sampleType,

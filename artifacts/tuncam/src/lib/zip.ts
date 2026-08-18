@@ -25,12 +25,30 @@ function u32(view: DataView, offset: number, value: number) {
 
 async function toBytes(data: Blob | Uint8Array | string) {
   if (typeof data === 'string') return new TextEncoder().encode(data);
-  if (data instanceof Uint8Array) return data;
+  if (data instanceof Uint8Array) {
+    const copy = new Uint8Array(data.byteLength);
+    copy.set(data);
+    return copy;
+  }
   return new Uint8Array(await data.arrayBuffer());
 }
 
 function toBlobPart(data: Uint8Array): BlobPart {
-  return new Uint8Array(data) as BlobPart;
+  const copy = new Uint8Array(data.byteLength);
+  copy.set(data);
+  return copy.buffer;
+}
+
+function zipSafeName(name: string) {
+  return name
+    .replaceAll('\\', '/')
+    .replace(/^\/+/, '')
+    .replace(/[^\x20-\x7E]/g, '-')
+    .replace(/\/{2,}/g, '/');
+}
+
+function nameFlags(nameBytes: Uint8Array) {
+  return nameBytes.every((byte) => byte < 128) ? 0 : 0x0800;
 }
 
 export type ZipEntry = {
@@ -45,8 +63,9 @@ export async function buildZip(entries: ZipEntry[]) {
   let offset = 0;
 
   for (const entry of entries) {
-    const name = entry.name.replaceAll('\\', '/').replace(/^\/+/, '');
+    const name = zipSafeName(entry.name);
     const nameBytes = new TextEncoder().encode(name);
+    const flags = nameFlags(nameBytes);
     const payload = await toBytes(entry.data);
     const crc = crc32(payload);
 
@@ -54,7 +73,7 @@ export async function buildZip(entries: ZipEntry[]) {
     const localView = new DataView(local.buffer);
     u32(localView, 0, 0x04034b50);
     u16(localView, 4, 20);
-    u16(localView, 6, 0x0800);
+    u16(localView, 6, flags);
     u16(localView, 8, 0);
     u16(localView, 10, stamp.time);
     u16(localView, 12, stamp.date);
@@ -69,7 +88,7 @@ export async function buildZip(entries: ZipEntry[]) {
     u32(centralView, 0, 0x02014b50);
     u16(centralView, 4, 20);
     u16(centralView, 6, 20);
-    u16(centralView, 8, 0x0800);
+    u16(centralView, 8, flags);
     u16(centralView, 10, 0);
     u16(centralView, 12, stamp.time);
     u16(centralView, 14, stamp.date);

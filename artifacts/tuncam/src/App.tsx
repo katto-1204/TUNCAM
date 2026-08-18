@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   Aperture, Archive, BadgeCheck, Camera, Check, ChevronDown, CircleAlert,
-  ClipboardList, CloudOff, Download, FolderOpen, Gauge, HardDrive,
+  ClipboardList, CloudOff, Download, FileImage, FolderOpen, Gauge, HardDrive,
   Image as ImageIcon, Info, Keyboard, MonitorDown, Pause, Plus, RefreshCw,
   ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2,
   Undo2, Upload, UserRound, Video, X, Zap,
@@ -11,12 +11,13 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import {
-  buildFilename, defaultSettings, gradeColors, gradeLabels, grades, manifestCsv, manifestJson,
-  recordPath, today, type Grade, type RecordItem, type SampleType, type SessionSettings, triggerDownload,
+  buildFilename, datasetZipName, defaultSettings, exampleFilename, exportGuideText, gradeColors,
+  gradeLabels, grades, jpegFilename, manifestCsv, manifestJson, photoZipPath, recordPath, today,
+  type Grade, type RecordItem, type SampleType, type SessionSettings, triggerDownload,
 } from '@/lib/dataset';
 import { deleteRelativeFile, ensureFolderPermission, pickSessionFolder, writeRelativeFile } from '@/lib/local-folder';
 import { getAllImages, listRecords, loadDirectoryHandle, migrateLegacyRecords, putRecord, removeRecord, saveDirectoryHandle } from '@/lib/session-store';
-import { buildZip } from '@/lib/zip';
+import { buildZip, type ZipEntry } from '@/lib/zip';
 
 const queryClient = new QueryClient();
 const SETTINGS_KEY = 'tuncam-session-settings-v1';
@@ -293,7 +294,7 @@ function Tuncam() {
       setCapturedPreview(undefined);
       setIsGradeOpen(false);
       setIsCapturing(false);
-      notify(`${record.filename} saved to ${recordPath(record).replace(`/${record.filename}`, '')}`, 'success');
+      notify(`${jpegFilename(record)} saved.`, 'success');
     } catch {
       notify('Could not save this capture. Check storage space and try again.', 'warning');
     }
@@ -389,37 +390,42 @@ function Tuncam() {
 
   const exportDataset = async () => {
     if (!records.length) {
-      notify('Capture at least one sample before downloading the dataset.', 'warning');
+      notify('Capture at least one sample before downloading the photos.', 'warning');
       return;
     }
     setIsExporting(true);
-    notify('Packing folders and images…', 'info');
+    notify('Packing photos as date-site-code-grade-sequence.jpg…', 'info');
     try {
       const images = await getAllImages();
       const missing: string[] = [];
-      const entries = [];
+      const sampleName = exampleFilename(settings.site);
+      const entries: ZipEntry[] = [
+        { name: 'HOW-TO-OPEN.txt', data: exportGuideText(sampleName) },
+      ];
       for (const record of [...records].sort((a, b) => a.sequence - b.sequence)) {
         const image = images.get(record.id);
+        const filename = jpegFilename(record);
         if (!image || !image.size) {
-          missing.push(record.filename);
+          missing.push(filename);
           continue;
         }
-        entries.push({ name: recordPath(record), data: image });
+        entries.push({ name: photoZipPath(record), data: image });
       }
-      entries.push({ name: `tuncam-${today()}-manifest.csv`, data: manifestCsv(records, settings) });
-      entries.push({ name: `tuncam-${today()}-manifest.json`, data: manifestJson(records, settings) });
+      entries.push({ name: 'session-manifest.csv', data: manifestCsv(records, settings) });
+      entries.push({ name: 'session-manifest.json', data: manifestJson(records, settings) });
       const zip = await buildZip(entries);
-      triggerDownload(zip, `tuncam-${today()}-dataset.zip`);
+      triggerDownload(zip, datasetZipName(settings.site));
       if (folderRef.current) {
         const allowed = await ensureFolderPermission(folderRef.current);
         if (allowed) {
-          await writeRelativeFile(folderRef.current, `tuncam-${today()}-manifest.csv`, manifestCsv(records, settings));
-          await writeRelativeFile(folderRef.current, `tuncam-${today()}-manifest.json`, manifestJson(records, settings));
+          await writeRelativeFile(folderRef.current, 'HOW-TO-OPEN.txt', exportGuideText(sampleName));
+          await writeRelativeFile(folderRef.current, 'session-manifest.csv', manifestCsv(records, settings));
+          await writeRelativeFile(folderRef.current, 'session-manifest.json', manifestJson(records, settings));
         }
       }
-      notify(missing.length ? `Dataset downloaded. ${missing.length} image(s) were missing from storage.` : 'Dataset ZIP downloaded with folders, images, CSV, and JSON.', 'success');
+      notify(missing.length ? `Photos downloaded. ${missing.length} image(s) were missing from storage.` : 'ZIP downloaded. Extract it, then open the PHOTOS folder.', 'success');
     } catch {
-      notify('Dataset download failed. Try exporting CSV/JSON, then retry the ZIP.', 'warning');
+      notify('Photo download failed. Try exporting CSV/JSON, then retry the ZIP.', 'warning');
     } finally {
       setIsExporting(false);
     }
@@ -530,7 +536,7 @@ function Tuncam() {
             <ShortcutPill keys="?" label="Help" />
           </div>
           <div className="text-[10px] font-bold text-[#667f92]">
-            {latestRecord ? `Last saved: ${latestRecord.filename}` : 'No captures yet. Frame the sample and press Space.'}
+            {latestRecord ? `Last saved: ${jpegFilename(latestRecord)}` : 'No captures yet. Frame the sample and press Space.'}
           </div>
         </section>
 
@@ -577,14 +583,19 @@ function Tuncam() {
           </section>
 
           <aside className="space-y-3">
-            <div className="soft-card rounded-[22px] p-4"><div className="flex items-start justify-between"><div><p className="eyebrow">03 / Session pulse</p><h2 className="mt-1 text-[16px] font-extrabold tracking-[-.03em] text-[#203c53]">Today’s tally</h2></div><div className="blue-sheen rounded-xl p-2 text-white"><Gauge size={17} /></div></div><div className="mt-4 grid grid-cols-4 gap-1.5">{grades.map((grade) => <div key={grade} className="rounded-xl bg-[#f5f9fb] px-2 py-2.5 text-center"><div className="mx-auto mb-1 flex size-6 items-center justify-center rounded-lg text-[11px] font-extrabold text-white" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</div><p data-testid={`text-count-${grade.toLowerCase()}`} className="mono text-[18px] font-medium text-[#24435a]">{counts[grade]}</p><p className="mt-0.5 text-[8px] font-bold uppercase tracking-[.06em] text-[#91a6b3]">{grade === 'Invalid' ? 'bad' : 'grade'}</p></div>)}</div><div className="mt-3 flex items-center justify-between border-t border-[#e6eef3] pt-3"><span className="text-[11px] font-bold text-[#577286]">Total captured</span><span data-testid="text-total-captured" className="mono text-[18px] font-medium text-[#1c75ac]">{records.length.toString().padStart(3, '0')}</span></div>{latestRecord && <div className="mt-3 rounded-2xl border border-[#d7e8f3] bg-white/70 p-3"><p className="eyebrow">Last capture</p><p className="mt-1 truncate text-[11px] font-extrabold text-[#36576c]">{latestRecord.filename}</p><p className="mt-1 text-[10px] text-[#7f95a5]">{latestRecord.sampleType} · {gradeLabels[latestRecord.grade]}</p></div>}</div>
+            <div className="soft-card rounded-[22px] p-4"><div className="flex items-start justify-between"><div><p className="eyebrow">03 / Session pulse</p><h2 className="mt-1 text-[16px] font-extrabold tracking-[-.03em] text-[#203c53]">Today’s tally</h2></div><div className="blue-sheen rounded-xl p-2 text-white"><Gauge size={17} /></div></div><div className="mt-4 grid grid-cols-4 gap-1.5">{grades.map((grade) => <div key={grade} className="rounded-xl bg-[#f5f9fb] px-2 py-2.5 text-center"><div className="mx-auto mb-1 flex size-6 items-center justify-center rounded-lg text-[11px] font-extrabold text-white" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</div><p data-testid={`text-count-${grade.toLowerCase()}`} className="mono text-[18px] font-medium text-[#24435a]">{counts[grade]}</p><p className="mt-0.5 text-[8px] font-bold uppercase tracking-[.06em] text-[#91a6b3]">{grade === 'Invalid' ? 'bad' : 'grade'}</p></div>)}</div><div className="mt-3 flex items-center justify-between border-t border-[#e6eef3] pt-3"><span className="text-[11px] font-bold text-[#577286]">Total captured</span><span data-testid="text-total-captured" className="mono text-[18px] font-medium text-[#1c75ac]">{records.length.toString().padStart(3, '0')}</span></div>{latestRecord && <div className="mt-3 rounded-2xl border border-[#d7e8f3] bg-white/70 p-3"><p className="eyebrow">Last capture</p><p className="mt-1 truncate font-mono text-[11px] font-extrabold text-[#36576c]">{jpegFilename(latestRecord)}</p><p className="mt-1 text-[10px] text-[#7f95a5]">{latestRecord.sampleType} · {gradeLabels[latestRecord.grade]}</p></div>}</div>
             <div className="soft-card rounded-[22px] p-4"><div className="flex items-center justify-between"><div><p className="eyebrow">Progress / target 800</p><p className="mt-1 text-[12px] font-bold text-[#426278]">Class balance</p></div><SlidersHorizontal size={16} className="text-[#78a1b7]" /></div><div className="mt-3 space-y-3">{(['Sashibo Core', 'Tail-Cut'] as SampleType[]).map((type) => <div key={type}><div className="mb-1.5 flex items-center justify-between text-[10px]"><span className="font-bold text-[#5c7587]">{type}</span><span className="mono text-[#849aa8]">{typeCounts[type]} / 3,200</span></div><div className="h-2 overflow-hidden rounded-full bg-[#e5eff4]"><div className="h-full rounded-full bg-gradient-to-r from-[#39b9e7] to-[#4a78df] transition-all duration-500" style={{ width: `${Math.min(100, typeCounts[type] / 32)}%` }} /></div></div>)}</div></div>
-            <div className="soft-card rounded-[22px] p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><HardDrive size={16} className={storageStatus.low ? 'text-[#d8796e]' : 'text-[#3c9cbb]'} /><span className="text-[11px] font-extrabold text-[#466479]">Local storage</span></div><span className={`rounded-full px-2 py-1 text-[9px] font-bold ${storageStatus.low ? 'bg-[#fff0ed] text-[#bd685f]' : 'bg-[#ebf8f4] text-[#2e8c70]'}`}>{storageStatus.low ? 'Review soon' : 'Healthy'}</span></div><p className="mt-2 text-[10px] leading-4 text-[#8499a8]">{storageStatus.quota ? `${formatBytes(storageStatus.used || 0)} used of ${formatBytes(storageStatus.quota)} browser quota.` : 'Browser storage estimate will appear when supported.'}</p>{storageStatus.low && <div className="mt-2 flex gap-2 rounded-lg bg-[#fff5f1] p-2 text-[10px] text-[#ae6259]"><CircleAlert size={14} className="shrink-0" /> Download the dataset ZIP and copy it to a backup drive.</div>}</div>
+            <div className="soft-card rounded-[22px] p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><HardDrive size={16} className={storageStatus.low ? 'text-[#d8796e]' : 'text-[#3c9cbb]'} /><span className="text-[11px] font-extrabold text-[#466479]">Local storage</span></div><span className={`rounded-full px-2 py-1 text-[9px] font-bold ${storageStatus.low ? 'bg-[#fff0ed] text-[#bd685f]' : 'bg-[#ebf8f4] text-[#2e8c70]'}`}>{storageStatus.low ? 'Review soon' : 'Healthy'}</span></div><p className="mt-2 text-[10px] leading-4 text-[#8499a8]">{storageStatus.quota ? `${formatBytes(storageStatus.used || 0)} used of ${formatBytes(storageStatus.quota)} browser quota.` : 'Browser storage estimate will appear when supported.'}</p>{storageStatus.low && <div className="mt-2 flex gap-2 rounded-lg bg-[#fff5f1] p-2 text-[10px] text-[#ae6259]"><CircleAlert size={14} className="shrink-0" /> Download the photos ZIP and copy it to a backup drive.</div>}</div>
             <div className="grid grid-cols-2 gap-2">
               <button type="button" data-testid="button-open-review" onClick={() => setIsReviewOpen(true)} className="focus-ring flex items-center justify-center gap-2 rounded-xl border border-[#d5e5ed] bg-white/80 py-3 text-[10px] font-extrabold text-[#4c6b7f] hover:bg-white"><ImageIcon size={15} /> Review <span className="rounded-full bg-[#eaf4f8] px-1.5 py-0.5 text-[9px] text-[#4182a1]">{records.length}</span></button>
               <button type="button" data-testid="button-end-session" onClick={() => setIsEndOpen(true)} className="focus-ring flex items-center justify-center gap-2 rounded-xl border border-[#e2dfe8] bg-white/80 py-3 text-[10px] font-extrabold text-[#766587] hover:bg-white"><Archive size={15} /> End session</button>
             </div>
-            <button type="button" data-testid="button-download-dataset" disabled={!records.length || isExporting} onClick={() => void exportDataset()} className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl bg-[#214e69] py-3 text-[10px] font-extrabold text-white hover:bg-[#1b4259] disabled:opacity-40"><Download size={15} />{isExporting ? 'Packing dataset…' : 'Download folders + images'}</button>
+            <DownloadPanel
+              exampleName={exampleFilename(settings.site)}
+              count={records.length}
+              exporting={isExporting}
+              onDownload={() => void exportDataset()}
+            />
           </aside>
         </section>
 
@@ -596,6 +607,58 @@ function Tuncam() {
       {isSettingsOpen && <ToolsModal settings={settings} onClose={() => setIsSettingsOpen(false)} onInstall={installPrompt ? installApp : undefined} />}
       {isShortcutOpen && <ShortcutModal onClose={() => setIsShortcutOpen(false)} />}
       <div className="fixed bottom-4 left-1/2 z-50 flex w-[min(92vw,390px)] -translate-x-1/2 flex-col gap-2">{toasts.map((toast) => <div key={toast.id} className={`toast-in flex items-center gap-2 rounded-xl border px-3 py-2.5 text-[11px] font-bold shadow-[0_12px_30px_rgba(38,80,112,.16)] ${toast.tone === 'success' ? 'border-[#b9e8d7] bg-[#f0fbf7] text-[#267f69]' : toast.tone === 'warning' ? 'border-[#f0d4c2] bg-[#fff7f1] text-[#a66b54]' : 'border-[#c8e4ee] bg-white text-[#4c6c80]'}`}><Info size={14} /> {toast.message}</div>)}</div>
+    </div>
+  );
+}
+
+function DownloadPanel({ exampleName, count, exporting, onDownload }: { exampleName: string; count: number; exporting: boolean; onDownload: () => void }) {
+  return (
+    <div className="export-card soft-card rounded-[22px] p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="eyebrow">04 / Download</p>
+          <h2 className="mt-1 text-[16px] font-extrabold tracking-[-.03em] text-[#203c53]">Photos ZIP</h2>
+        </div>
+        <div className="rounded-xl bg-[#eaf6fb] p-2 text-[#2aa6d7]"><FileImage size={17} /></div>
+      </div>
+      <p className="mt-2 text-[10px] leading-4 text-[#7d94a4]">Extract the ZIP, then open the PHOTOS folder. File names look like this:</p>
+      <FilenamePreview name={exampleName} />
+      <button
+        type="button"
+        data-testid="button-download-dataset"
+        disabled={!count || exporting}
+        onClick={onDownload}
+        className="focus-ring mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#214e69] py-3 text-[10px] font-extrabold text-white hover:bg-[#1b4259] disabled:opacity-40"
+      >
+        <Download size={15} />{exporting ? 'Packing photos…' : `Download ${count || 0} photo${count === 1 ? '' : 's'} ZIP`}
+      </button>
+    </div>
+  );
+}
+
+function FilenamePreview({ name }: { name: string }) {
+  const parts = name.replace(/\.jpg$/i, '').split('-');
+  const date = parts.slice(0, 3).join('-');
+  const sequence = parts.at(-1) || '001';
+  const grade = parts.at(-2) || 'A';
+  const code = parts.at(-3) || 'sc';
+  const site = parts.slice(3, -3).join('-') || 'bangkerohan';
+  return (
+    <div className="filename-chip mt-3 rounded-[16px] border border-[#d4e6f0] bg-white/85 p-3">
+      <p className="break-all font-mono text-[11px] font-bold leading-5 text-[#214e69]">{name}</p>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {[
+          ['date', date],
+          ['site', site],
+          ['type', code],
+          ['grade', grade],
+          ['seq', sequence],
+        ].map(([label, value]) => (
+          <span key={label} className="rounded-full bg-[#eef6fb] px-2 py-0.5 text-[8px] font-bold uppercase tracking-[.06em] text-[#5b7a8e]">
+            {label} {value}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -673,7 +736,7 @@ function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[10px] font-extrabold text-[#36576c]">{record.filename}</p>
+                      <p className="truncate font-mono text-[10px] font-extrabold text-[#36576c]">{jpegFilename(record)}</p>
                       <p className="mt-1 text-[9px] text-[#8198a6]">{record.sampleType} · {record.site}</p>
                       <div className="mt-2 flex items-center gap-2">
                         <span className="inline-flex rounded-full px-2 py-0.5 text-[9px] font-extrabold text-white" style={{ background: gradeColors[record.grade] }}>
@@ -701,9 +764,9 @@ function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport
                       </div>
                       <div className="mt-4 rounded-[22px] border border-[#d8e7f0] bg-white/80 p-4">
                         <p className="eyebrow">Filename</p>
-                        <p className="mt-2 break-all text-[13px] font-extrabold text-[#254157]">{selectedRecord.filename}</p>
+                        <p className="mt-2 break-all font-mono text-[13px] font-extrabold text-[#254157]">{jpegFilename(selectedRecord)}</p>
                         <p className="mt-2 text-[10px] leading-5 text-[#7b91a2]">
-                          This image is stored locally and exported into its date / sample type / grade folder when you download the dataset ZIP.
+                          Downloads land in the PHOTOS folder as date-site-sampletypecode-grade-sequence.jpg. Double-click the JPG to open it.
                         </p>
                       </div>
                     </div>
@@ -753,13 +816,13 @@ function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#e1edf2] bg-[#f0f6f9] px-5 py-3">
-          <span className="text-[10px] text-[#8197a5]">Images stay on this device until you download the dataset ZIP.</span>
+          <span className="text-[10px] text-[#8197a5]">Extract the ZIP, then open PHOTOS. Do not open the CSV as a photo.</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" data-testid="button-export-json-review" onClick={() => onExport('json')} className="focus-ring flex items-center gap-1.5 rounded-lg border border-[#d1e1e8] bg-white px-3 py-2 text-[10px] font-bold text-[#527084]">
               <Download size={13} /> JSON
             </button>
             <button type="button" data-testid="button-download-dataset-review" disabled={!records.length || exporting} onClick={onDownload} className="focus-ring flex items-center gap-1.5 rounded-lg bg-[#214e69] px-3 py-2 text-[10px] font-extrabold text-white disabled:opacity-40">
-              <FolderOpen size={13} /> Folders + images
+              <FileImage size={13} /> Download photos ZIP
             </button>
             <button type="button" data-testid="button-done-review" onClick={onClose} className="focus-ring rounded-lg border border-[#d1e1e8] bg-white px-4 py-2 text-[10px] font-extrabold text-[#214e69]">
               Done
@@ -771,7 +834,61 @@ function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport
   );
 }
 function EndModal({ records, settings, exporting, onClose, onExport, onDownload }: { records: RecordItem[]; settings: SessionSettings; exporting: boolean; onClose: () => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
-  return <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#18354a]/40 p-4 backdrop-blur-sm"><div className="modal-in w-full max-w-[530px] overflow-hidden rounded-[24px] border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.24)]"><div className="blue-sheen p-6 text-white"><div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.14em] text-white/70">Session wrap</p><h2 className="mt-2 text-[25px] font-extrabold tracking-[-.05em]">Secure the day’s work.</h2><p className="mt-1 text-[11px] text-white/75">Download the image folders first. CSV and JSON are included in the ZIP and also available separately.</p></div><Archive size={27} className="text-white/80" /></div></div><div className="space-y-4 p-6"><div className="grid grid-cols-3 gap-2">{[['Samples', records.length], ['Operator', settings.operator || '—'], ['Grader', settings.grader || '—']].map(([label, value]) => <div key={String(label)} className="rounded-xl bg-[#eef6f9] p-3"><p className="eyebrow">{label}</p><p className="mt-1 truncate text-[12px] font-extrabold text-[#38566a]">{value}</p></div>)}</div><div className="flex gap-3 rounded-[15px] border border-[#f0d9c8] bg-[#fff8f2] p-3.5"><Upload size={17} className="mt-0.5 shrink-0 text-[#d08362]" /><div><p className="text-[11px] font-extrabold text-[#805846]">Backup reminder</p><p className="mt-1 text-[10px] leading-4 text-[#9e7662]">Copy today’s ZIP or folder to a USB drive before leaving the landing center.</p></div></div><button type="button" data-testid="button-download-dataset-end" disabled={!records.length || exporting} onClick={onDownload} className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl bg-[#214e69] py-3.5 text-[12px] font-extrabold text-white disabled:opacity-40"><FolderOpen size={16} />{exporting ? 'Packing folders and images…' : 'Download folders + images'}</button><div className="flex gap-2"><button type="button" data-testid="button-export-csv-end" onClick={() => onExport('csv')} className="focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#cfe1e9] bg-white py-3 text-[11px] font-extrabold text-[#4f7185]"><Download size={15} /> CSV</button><button type="button" data-testid="button-export-json-end" onClick={() => onExport('json')} className="focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#cfe1e9] bg-white py-3 text-[11px] font-extrabold text-[#4f7185]"><Download size={15} /> JSON</button></div><button type="button" data-testid="button-close-end" onClick={onClose} className="focus-ring w-full rounded-xl border border-[#d5e5ee] bg-white py-3 text-[11px] font-extrabold text-[#214e69]">Continue session</button></div></div></div>;
+  const sampleName = exampleFilename(settings.site);
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#18354a]/40 p-4 backdrop-blur-sm">
+      <div className="modal-in w-full max-w-[560px] overflow-hidden rounded-[26px] border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.24)]">
+        <div className="blue-sheen p-6 text-white">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[.14em] text-white/70">Session wrap</p>
+              <h2 className="mt-2 text-[25px] font-extrabold tracking-[-.05em]">Secure the day’s work.</h2>
+              <p className="mt-1 text-[11px] text-white/75">Download the ZIP, extract it, then open the PHOTOS folder. Those files are the sample images.</p>
+            </div>
+            <Archive size={27} className="text-white/80" />
+          </div>
+        </div>
+        <div className="space-y-4 p-6">
+          <div className="grid grid-cols-3 gap-2">
+            {[['Samples', records.length], ['Operator', settings.operator || '—'], ['Grader', settings.grader || '—']].map(([label, value]) => (
+              <div key={String(label)} className="rounded-xl bg-[#eef6f9] p-3">
+                <p className="eyebrow">{label}</p>
+                <p className="mt-1 truncate text-[12px] font-extrabold text-[#38566a]">{value}</p>
+              </div>
+            ))}
+          </div>
+          <FilenamePreview name={sampleName} />
+          <ol className="grid gap-2">
+            {[
+              'Right-click the ZIP → Extract All.',
+              'Open the extracted folder, then open PHOTOS.',
+              'Double-click a .jpg to view it. Skip session-manifest.csv — that is a spreadsheet, not a photo.',
+            ].map((step, index) => (
+              <li key={step} className="flex gap-3 rounded-[14px] border border-[#dceaf1] bg-white/80 px-3 py-2.5">
+                <span className="mono flex size-6 shrink-0 items-center justify-center rounded-lg bg-[#e8f3ff] text-[10px] font-bold text-[#3d63cf]">{index + 1}</span>
+                <p className="text-[11px] leading-4 text-[#4d6a7d]">{step}</p>
+              </li>
+            ))}
+          </ol>
+          <div className="flex gap-3 rounded-[15px] border border-[#f0d9c8] bg-[#fff8f2] p-3.5">
+            <Upload size={17} className="mt-0.5 shrink-0 text-[#d08362]" />
+            <div>
+              <p className="text-[11px] font-extrabold text-[#805846]">Backup reminder</p>
+              <p className="mt-1 text-[10px] leading-4 text-[#9e7662]">Copy today’s ZIP to a USB drive before leaving the landing center.</p>
+            </div>
+          </div>
+          <button type="button" data-testid="button-download-dataset-end" disabled={!records.length || exporting} onClick={onDownload} className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl bg-[#214e69] py-3.5 text-[12px] font-extrabold text-white disabled:opacity-40">
+            <FileImage size={16} />{exporting ? 'Packing photos…' : 'Download photos ZIP'}
+          </button>
+          <div className="flex gap-2">
+            <button type="button" data-testid="button-export-csv-end" onClick={() => onExport('csv')} className="focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#cfe1e9] bg-white py-3 text-[11px] font-extrabold text-[#4f7185]"><Download size={15} /> CSV</button>
+            <button type="button" data-testid="button-export-json-end" onClick={() => onExport('json')} className="focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#cfe1e9] bg-white py-3 text-[11px] font-extrabold text-[#4f7185]"><Download size={15} /> JSON</button>
+          </div>
+          <button type="button" data-testid="button-close-end" onClick={onClose} className="focus-ring w-full rounded-xl border border-[#d5e5ee] bg-white py-3 text-[11px] font-extrabold text-[#214e69]">Continue session</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 function ToolsModal({ settings, onClose, onInstall }: { settings: SessionSettings; onClose: () => void; onInstall?: () => Promise<void> }) {
   return <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#18354a]/40 p-4 backdrop-blur-sm"><div className="modal-in w-full max-w-[460px] rounded-[24px] border border-white/70 bg-[#f9fcfd] p-6 shadow-[0_25px_80px_rgba(20,58,86,.24)]"><div className="flex items-start justify-between"><div><p className="eyebrow">Session tools</p><h2 className="mt-1 text-[19px] font-extrabold text-[#203e54]">Field instrument</h2></div><button type="button" data-testid="button-close-tools" onClick={onClose} className="focus-ring rounded-lg p-2 text-[#78919f] hover:bg-white"><X size={18} /></button></div><div className="mt-5 space-y-2"><ToolRow icon={<CloudOff size={16} />} title="Offline-first storage" detail="Captures stay in this browser and optional local folder." /><ToolRow icon={<ShieldCheck size={16} />} title="No auto-detect" detail="Camera and shutter are manual only. Nothing captures itself." /><ToolRow icon={<FolderOpen size={16} />} title="Folder access" detail={settings.storage} /></div>{onInstall && <button type="button" data-testid="button-install-tools" onClick={onInstall} className="focus-ring mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#e7f6fb] py-3 text-[11px] font-extrabold text-[#257d9f]"><Download size={15} /> Install TUNCAM on this device</button>}<button type="button" data-testid="button-done-tools" onClick={onClose} className="focus-ring mt-2 w-full rounded-xl bg-[#214e69] py-3 text-[11px] font-extrabold text-white">Done</button></div></div>;
