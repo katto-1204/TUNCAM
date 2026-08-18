@@ -130,8 +130,54 @@ button:disabled { cursor: not-allowed; }
     0 16px 30px rgba(53, 91, 213, .28),
     inset 0 1px 0 rgba(255,255,255,.18);
 }
-.review-rail {
-  background: linear-gradient(180deg, rgba(246, 250, 253, .95), rgba(241, 247, 252, .7));
+.review-modal {
+  background: #fff;
+}
+.review-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #fff;
+  padding: 6px 10px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #475569;
+  transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.review-filter-pill:hover {
+  border-color: #cbd5e1;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, .06);
+}
+.review-filter-pill-active {
+  border-color: #334155;
+  background: #1e293b;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, .12);
+}
+.review-gallery-card {
+  border: 1px solid #ececec;
+  border-radius: 16px;
+  background: #fff;
+  padding: 8px;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.review-gallery-card:hover {
+  border-color: #d4d4d8;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, .08);
+  transform: translateY(-2px);
+}
+.review-gallery {
+  scrollbar-gutter: stable;
+}
+.review-gallery::-webkit-scrollbar {
+  width: 8px;
+}
+.review-gallery::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #d4d4d8;
 }
 .filename-chip {
   box-shadow: inset 0 1px 0 rgba(255,255,255,.8);

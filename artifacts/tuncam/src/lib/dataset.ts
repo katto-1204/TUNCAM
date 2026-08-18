@@ -62,8 +62,14 @@ export function gradeFolder(grade: Grade) {
   return grade === 'Invalid' ? 'Invalid' : `Grade${grade}`;
 }
 
-export function recordFolder(record: Pick<RecordItem, 'date' | 'sampleType' | 'grade'>) {
-  return `${record.date}/${sampleFolder(record.sampleType)}/${gradeFolder(record.grade)}`;
+export const exportRoot = 'tuncam';
+
+export function sessionFolder(site: string, date = today()) {
+  return `${date}-${slug(site)}`;
+}
+
+export function recordFolder(record: Pick<RecordItem, 'date' | 'site' | 'sampleType' | 'grade'>) {
+  return `${exportRoot}/${sessionFolder(record.site, record.date)}/${sampleFolder(record.sampleType)}/${gradeFolder(record.grade)}`;
 }
 
 export function recordPath(record: RecordItem) {
@@ -79,36 +85,54 @@ export function jpegFilename(record: Pick<RecordItem, 'date' | 'site' | 'sampleT
 }
 
 export function photoZipPath(record: RecordItem) {
-  return `PHOTOS/${jpegFilename(record)}`;
+  return recordPath(record);
 }
 
 export function exampleFilename(site: string, date = today()) {
   return buildFilename(site || 'Bangkerohan, General Santos City', 'Sashibo Core', 'A', 1, date);
 }
 
+export function exampleFolder(site: string, date = today()) {
+  return `${exportRoot}/${sessionFolder(site, date)}/Sashibo-Core/GradeA`;
+}
+
 export function datasetZipName(site: string, date = today()) {
   return `TUNCAM-${date}-${slug(site)}.zip`;
 }
 
-export function exportGuideText(sampleName: string) {
+export function exportGuideText(site: string, sampleName: string, date = today()) {
+  const session = sessionFolder(site, date);
   return [
-    'TUNCAM photo pack',
+    'TUNCAM session export',
     '',
-    'Open the PHOTOS folder. Those are the sample images.',
+    'After Extract All, open this folder tree:',
     '',
-    'Each photo is named:',
-    '  date-site-sampletypecode-grade-sequence.jpg',
+    `  ${exportRoot}/`,
+    `    ${session}/`,
+    '      Sashibo-Core/',
+    '        GradeA/',
+    '        GradeB/',
+    '        GradeC/',
+    '        Invalid/',
+    '      Tail-Cut/',
+    '        GradeA/',
+    '        GradeB/',
+    '        GradeC/',
+    '        Invalid/',
+    '',
+    'Each photo lives inside the matching sample type and grade folder.',
+    'Filename format: date-site-sampletypecode-grade-sequence.jpg',
     `Example: ${sampleName}`,
     '',
     'How to open on Windows:',
     '1. Right-click the ZIP > Extract All.',
-    '2. Open the extracted folder, then open PHOTOS.',
+    `2. Open ${exportRoot} > ${session} > Sashibo-Core or Tail-Cut > GradeA (or B / C / Invalid).`,
     '3. Double-click a JPG file to view it.',
     '',
     'Windows may hide the .jpg extension. The Type column should still say JPG File.',
     'session-manifest.csv is a spreadsheet of capture details, not a photo.',
     '',
-    'Codes: sc = Sashibo Core, tc = Tail-Cut. Grade is A, B, C, or Invalid.',
+    'Codes: sc = Sashibo Core, tc = Tail-Cut.',
   ].join('\n');
 }
 
@@ -159,12 +183,14 @@ export function dataUrlToBlob(dataUrl: string) {
 }
 
 export function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
+  link.href = url;
   link.download = filename;
   link.rel = 'noopener';
   document.body.appendChild(link);
   link.click();
   link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(link.href), 1500);
+  const keepMs = Math.min(10 * 60_000, Math.max(120_000, Math.ceil(blob.size / 8)));
+  window.setTimeout(() => URL.revokeObjectURL(url), keepMs);
 }

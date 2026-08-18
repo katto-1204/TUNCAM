@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
-  Aperture, Archive, BadgeCheck, Camera, Check, ChevronDown, CircleAlert,
+  Aperture, Archive, BadgeCheck, Camera, Check, ChevronDown, ChevronLeft, CircleAlert,
   ClipboardList, CloudOff, Download, FileImage, FolderOpen, Gauge, HardDrive,
   Image as ImageIcon, Info, Keyboard, MonitorDown, Pause, Plus, RefreshCw,
   ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2,
@@ -400,7 +400,7 @@ function Tuncam() {
       const missing: string[] = [];
       const sampleName = exampleFilename(settings.site);
       const entries: ZipEntry[] = [
-        { name: 'HOW-TO-OPEN.txt', data: exportGuideText(sampleName) },
+        { name: 'HOW-TO-OPEN.txt', data: exportGuideText(settings.site, sampleName) },
       ];
       for (const record of [...records].sort((a, b) => a.sequence - b.sequence)) {
         const image = images.get(record.id);
@@ -418,12 +418,12 @@ function Tuncam() {
       if (folderRef.current) {
         const allowed = await ensureFolderPermission(folderRef.current);
         if (allowed) {
-          await writeRelativeFile(folderRef.current, 'HOW-TO-OPEN.txt', exportGuideText(sampleName));
+          await writeRelativeFile(folderRef.current, 'HOW-TO-OPEN.txt', exportGuideText(settings.site, sampleName));
           await writeRelativeFile(folderRef.current, 'session-manifest.csv', manifestCsv(records, settings));
           await writeRelativeFile(folderRef.current, 'session-manifest.json', manifestJson(records, settings));
         }
       }
-      notify(missing.length ? `Photos downloaded. ${missing.length} image(s) were missing from storage.` : 'ZIP downloaded. Extract it, then open the PHOTOS folder.', 'success');
+      notify(missing.length ? `Photos downloaded. ${missing.length} image(s) were missing from storage.` : 'ZIP downloaded. Extract it, then open tuncam > date-place > sample type > grade.', 'success');
     } catch {
       notify('Photo download failed. Try exporting CSV/JSON, then retry the ZIP.', 'warning');
     } finally {
@@ -452,7 +452,7 @@ function Tuncam() {
         const image = images.get(record.id);
         if (image?.size) await writeRelativeFile(handle, recordPath(record), image);
       }
-      notify(`Saving into “${handle.name}” using date / sample type / grade folders.`, 'success');
+      notify(`Saving into “${handle.name}” using tuncam / date-place / sample type / grade folders.`, 'success');
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         notify('Folder selection cancelled. Nothing changed.', 'info');
@@ -621,7 +621,7 @@ function DownloadPanel({ exampleName, count, exporting, onDownload }: { exampleN
         </div>
         <div className="rounded-xl bg-[#eaf6fb] p-2 text-[#2aa6d7]"><FileImage size={17} /></div>
       </div>
-      <p className="mt-2 text-[10px] leading-4 text-[#7d94a4]">Extract the ZIP, then open the PHOTOS folder. File names look like this:</p>
+      <p className="mt-2 text-[10px] leading-4 text-[#7d94a4]">Extract the ZIP into tuncam / date-place / Tail-Cut or Sashibo-Core / GradeA–Invalid. Example file:</p>
       <FilenamePreview name={exampleName} />
       <button
         type="button"
@@ -681,142 +681,219 @@ function GradeModal({ image, onSelect, onCancel }: { image?: string; onSelect: (
   return <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#18354a]/45 p-4 backdrop-blur-sm"><div className="modal-in w-full max-w-[620px] overflow-hidden rounded-[24px] border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.28)]"><div className="flex items-start justify-between border-b border-[#e4edf2] px-5 py-4 sm:px-6"><div><p className="eyebrow text-[#288bab]">Capture held · label required</p><h2 className="mt-1 text-[20px] font-extrabold tracking-[-.04em] text-[#1f3c52]">How would you grade this sample?</h2><p className="mt-1 text-[11px] text-[#77909e]">Choose one label to save the image and continue.</p></div><div className="rounded-xl bg-[#eaf7fb] p-2 text-[#299ac4]"><ClipboardList size={18} /></div></div><div className="grid gap-4 p-5 sm:grid-cols-[160px_1fr] sm:p-6">{image ? <img src={image} alt="Captured tuna sample awaiting grade" className="aspect-square w-full rounded-[15px] border border-[#dbe8ee] object-cover" /> : <div className="flex aspect-square items-center justify-center rounded-[15px] bg-[#eaf1f5] text-[#7a98aa]"><ImageIcon /></div>}<div className="grid grid-cols-2 gap-2.5">{grades.map((grade, index) => <button type="button" key={grade} data-testid={`button-grade-${grade.toLowerCase()}`} onClick={() => onSelect(grade)} className="focus-ring group flex min-h-[86px] flex-col items-start justify-between rounded-[15px] border border-[#d8e6ed] bg-white p-3 text-left shadow-[0_4px_12px_rgba(38,83,109,.04)] transition hover:-translate-y-0.5 hover:border-[#7dc8e1] hover:shadow-[0_9px_20px_rgba(38,83,109,.11)]"><div className="flex w-full items-center justify-between"><span className="flex size-8 items-center justify-center rounded-xl text-[13px] font-extrabold text-white" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</span><span className="mono text-[10px] text-[#a0b1bb]">{index + 1}</span></div><span className="text-[11px] font-extrabold text-[#486579]">{gradeLabels[grade]}</span></button>)}</div></div><div className="flex items-center justify-between bg-[#f0f6f9] px-5 py-3 text-[10px] text-[#78909e] sm:px-6"><span className="flex items-center gap-2"><Zap size={13} className="text-[#2aa4ce]" /> Keyboard ready: 1 / 2 / 3 / 4</span><button type="button" data-testid="button-cancel-capture" onClick={onCancel} className="focus-ring font-bold text-[#6d8493] hover:text-[#287a9f]">Discard frame</button></div></div></div>;
 }
 function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport, onDownload }: { records: RecordItem[]; previews: Record<string, string>; exporting: boolean; onClose: () => void; onDelete: (id: string) => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
-  const [selectedId, setSelectedId] = useState(records[0]?.id ?? '');
+  const [selectedId, setSelectedId] = useState('');
+  const [gradeFilter, setGradeFilter] = useState<Grade | 'All'>('All');
+
+  const gradeCounts = useMemo(() => {
+    const counts: Record<Grade | 'All', number> = { All: records.length, A: 0, B: 0, C: 0, Invalid: 0 };
+    for (const record of records) counts[record.grade] += 1;
+    return counts;
+  }, [records]);
+
+  const filteredRecords = useMemo(() => {
+    if (gradeFilter === 'All') return records;
+    return records.filter((record) => record.grade === gradeFilter);
+  }, [records, gradeFilter]);
 
   useEffect(() => {
-    if (!records.length) {
+    if (selectedId && !records.some((record) => record.id === selectedId)) {
       setSelectedId('');
-      return;
-    }
-    if (!records.some((record) => record.id === selectedId)) {
-      setSelectedId(records[0].id);
     }
   }, [records, selectedId]);
 
-  const selectedRecord = records.find((record) => record.id === selectedId) ?? records[0];
+  const selectedRecord = selectedId ? records.find((record) => record.id === selectedId) : undefined;
+  const inDetail = Boolean(selectedRecord);
+
+  const handleDelete = (id: string) => {
+    onDelete(id);
+    if (selectedId === id) setSelectedId('');
+  };
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#18354a]/45 p-4 backdrop-blur-sm">
-      <div className="modal-in flex max-h-[min(840px,92dvh)] w-full max-w-[1120px] flex-col overflow-hidden rounded-[28px] border border-white/70 bg-[#f8fbfc] shadow-[0_25px_80px_rgba(20,58,86,.24)]">
-        <div className="flex items-center justify-between border-b border-[#e1edf2] px-5 py-4">
-          <div>
-            <p className="eyebrow">Session review</p>
-            <h2 className="mt-1 text-[18px] font-extrabold text-[#203e54]">
-              Captured samples <span className="mono text-[#298db6]">{records.length}</span>
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-3 backdrop-blur-[2px] sm:p-4">
+      <div className="review-modal modal-in flex max-h-[min(900px,94dvh)] w-full max-w-[1180px] flex-col overflow-hidden rounded-[24px] border border-[#ebebeb] bg-white shadow-[0_24px_80px_rgba(15,23,42,.14)]">
+        <div className="flex shrink-0 items-center justify-between border-b border-[#f0f0f0] bg-white px-4 py-4 sm:px-6">
+          <div className="min-w-0">
+            {inDetail ? (
+              <button
+                type="button"
+                data-testid="button-back-review"
+                onClick={() => setSelectedId('')}
+                className="focus-ring mb-2 flex items-center gap-1.5 rounded-lg px-1 py-0.5 text-[11px] font-bold text-[#64748b] transition hover:bg-[#f8fafc] hover:text-[#334155]"
+              >
+                <ChevronLeft size={16} /> Back to gallery
+              </button>
+            ) : (
+              <p className="eyebrow text-[#94a3b8]">Session archive</p>
+            )}
+            <h2 className="text-[18px] font-extrabold tracking-[-.03em] text-[#1e293b] sm:text-[20px]">
+              {inDetail ? 'Capture details' : (
+                <>Captured samples <span className="mono text-[#475569]">{filteredRecords.length}</span></>
+              )}
             </h2>
-            <p className="mt-1 text-[10px] text-[#7f95a5]">Click an image to inspect full details and metadata.</p>
+            <p className="mt-0.5 text-[10px] text-[#94a3b8]">
+              {inDetail ? jpegFilename(selectedRecord!) : 'Tap any sample to open full metadata and the large preview.'}
+            </p>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" data-testid="button-export-csv-review" onClick={() => onExport('csv')} className="focus-ring hidden items-center gap-1.5 rounded-lg border border-[#d3e4eb] bg-white px-2.5 py-2 text-[10px] font-bold text-[#527084] sm:flex">
+            <button type="button" data-testid="button-export-csv-review" onClick={() => onExport('csv')} className="focus-ring hidden items-center gap-1.5 rounded-lg border border-[#d1e1e8] bg-white px-2.5 py-2 text-[10px] font-bold text-[#527084] sm:flex">
               <Download size={13} /> CSV
             </button>
-            <button type="button" data-testid="button-close-review" onClick={onClose} className="focus-ring rounded-lg p-2 text-[#78919f] hover:bg-white">
+            <button type="button" data-testid="button-close-review" onClick={onClose} className="focus-ring rounded-lg p-2 text-[#94a3b8] transition hover:bg-[#f8fafc] hover:text-[#475569]">
               <X size={18} />
             </button>
           </div>
         </div>
 
-        <div className="grid flex-1 gap-0 lg:grid-cols-[340px_minmax(0,1fr)]">
-          {records.length ? (
-            <>
-              <div className="review-rail overflow-y-auto border-b border-[#e1edf2] p-4 lg:border-b-0 lg:border-r">
-                {records.map((record) => (
+        {!inDetail && records.length > 0 && (
+          <div className="review-filters shrink-0 border-b border-[#f0f0f0] bg-[#fafafa] px-4 py-3 sm:px-6">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-[9px] font-bold uppercase tracking-[.1em] text-[#94a3b8]">Filter</span>
+              {(['All', ...grades] as const).map((filter) => {
+                const active = gradeFilter === filter;
+                const label = filter === 'All' ? 'All' : filter === 'Invalid' ? 'Invalid' : `Grade ${filter}`;
+                const count = gradeCounts[filter];
+                return (
+                  <button
+                    key={filter}
+                    type="button"
+                    data-testid={`filter-grade-${filter.toLowerCase()}`}
+                    onClick={() => setGradeFilter(filter)}
+                    className={`focus-ring review-filter-pill ${active ? 'review-filter-pill-active' : ''}`}
+                    style={active && filter !== 'All' ? { background: gradeColors[filter], borderColor: gradeColors[filter], color: '#fff' } : undefined}
+                  >
+                    {label}
+                    <span className={`mono rounded-md px-1.5 py-0.5 text-[9px] ${active && filter !== 'All' ? 'bg-white/20' : 'bg-[#f1f5f9] text-[#64748b]'}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {!records.length ? (
+            <div className="flex min-h-[320px] flex-col items-center justify-center px-6 py-12 text-center">
+              <div className="mb-3 rounded-2xl bg-[#f8fafc] p-4 text-[#64748b]">
+                <Archive size={28} />
+              </div>
+              <h3 className="text-[14px] font-extrabold text-[#334155]">Nothing captured yet</h3>
+              <p className="mt-1 max-w-[260px] text-[11px] leading-4 text-[#94a3b8]">Completed samples will appear here for a quick quality check.</p>
+            </div>
+          ) : inDetail && selectedRecord ? (
+            <div className="p-4 sm:p-6">
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_340px]">
+                <div>
+                  <div className="overflow-hidden rounded-[20px] border border-[#ececec] bg-[#fafafa] p-2.5">
+                    {previews[selectedRecord.id] ? (
+                      <img src={previews[selectedRecord.id]} alt={jpegFilename(selectedRecord)} className="aspect-[4/3] w-full rounded-[14px] object-cover" />
+                    ) : (
+                      <div className="flex aspect-[4/3] items-center justify-center rounded-[14px] bg-[#f1f5f9] text-[#94a3b8]">
+                        <ImageIcon size={36} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-4 rounded-[18px] border border-[#ececec] bg-white p-4">
+                    <p className="eyebrow text-[#94a3b8]">Filename</p>
+                    <p className="mt-2 break-all font-mono text-[12px] font-bold leading-5 text-[#1e293b] sm:text-[13px]">{jpegFilename(selectedRecord)}</p>
+                    <p className="mt-2 text-[10px] leading-5 text-[#94a3b8]">
+                      Saved under tuncam / date-place / sample type / grade as date-site-sampletypecode-grade-sequence.jpg.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="rounded-[18px] border border-[#ececec] bg-white p-4">
+                    <p className="eyebrow text-[#94a3b8]">Capture info</p>
+                    <div className="mt-3 grid gap-2">
+                      {[
+                        { label: 'Sample type', value: selectedRecord.sampleType },
+                        { label: 'Grade', value: gradeLabels[selectedRecord.grade] },
+                        { label: 'Collection site', value: selectedRecord.site },
+                        { label: 'Capture date', value: selectedRecord.date },
+                        { label: 'Sequence', value: String(selectedRecord.sequence).padStart(3, '0') },
+                        { label: 'Created at', value: new Date(selectedRecord.createdAt).toLocaleString() },
+                      ].map((item) => (
+                        <div key={item.label} className="rounded-xl border border-[#f1f5f9] bg-[#fafafa] px-3 py-2.5">
+                          <p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#94a3b8]">{item.label}</p>
+                          <p className="mt-1 text-[11px] font-extrabold text-[#334155]">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    data-testid={`button-delete-record-${selectedRecord.id}`}
+                    onClick={() => handleDelete(selectedRecord.id)}
+                    className="focus-ring flex w-full items-center justify-center gap-2 rounded-[16px] border border-[#f0d4c2] bg-[#fff7f1] px-4 py-3 text-[11px] font-extrabold text-[#b0634f] hover:bg-[#fff2ea]"
+                  >
+                    <Trash2 size={15} /> Delete this capture
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : filteredRecords.length ? (
+            <div className="review-gallery p-4 sm:p-6">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {filteredRecords.map((record) => (
                   <button
                     type="button"
                     key={record.id}
                     data-testid={`card-record-${record.id}`}
                     onClick={() => setSelectedId(record.id)}
-                    className={`review-card focus-ring mb-3 flex w-full items-center gap-3 rounded-[18px] border p-3 text-left transition ${selectedRecord?.id === record.id ? 'border-[#92c8ee] bg-[#eef8ff]' : 'border-[#dce9ef] bg-white/82 hover:border-[#b9dbed] hover:bg-white'}`}
+                    className="review-gallery-card focus-ring group text-left"
                   >
-                    {previews[record.id] ? (
-                      <img src={previews[record.id]} alt={`${record.sampleType}, ${gradeLabels[record.grade]}`} className="size-20 rounded-[14px] object-cover" />
-                    ) : (
-                      <div className="flex size-20 items-center justify-center rounded-[14px] bg-[#eaf2f6] text-[#7190a1]">
-                        <ImageIcon size={20} />
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-mono text-[10px] font-extrabold text-[#36576c]">{jpegFilename(record)}</p>
-                      <p className="mt-1 text-[9px] text-[#8198a6]">{record.sampleType} · {record.site}</p>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="inline-flex rounded-full px-2 py-0.5 text-[9px] font-extrabold text-white" style={{ background: gradeColors[record.grade] }}>
-                          {gradeLabels[record.grade]}
-                        </span>
-                        <span className="mono text-[9px] text-[#8ca1af]">#{String(record.sequence).padStart(3, '0')}</span>
-                      </div>
+                    <div className="relative aspect-square overflow-hidden rounded-[14px] bg-[#f1f5f9]">
+                      {previews[record.id] ? (
+                        <img
+                          src={previews[record.id]}
+                          alt={`${record.sampleType}, ${gradeLabels[record.grade]}`}
+                          className="size-full object-cover transition duration-300 group-hover:scale-[1.03]"
+                        />
+                      ) : (
+                        <div className="flex size-full items-center justify-center text-[#94a3b8]">
+                          <ImageIcon size={22} />
+                        </div>
+                      )}
+                      <span
+                        className="absolute left-2 top-2 rounded-full px-2 py-0.5 text-[8px] font-extrabold text-white shadow-sm"
+                        style={{ background: gradeColors[record.grade] }}
+                      >
+                        {record.grade === 'Invalid' ? '!' : record.grade}
+                      </span>
+                      <span className="absolute bottom-2 right-2 rounded-md bg-white/90 px-1.5 py-0.5 font-mono text-[8px] font-bold text-[#475569] shadow-sm backdrop-blur-sm">
+                        #{String(record.sequence).padStart(3, '0')}
+                      </span>
+                    </div>
+                    <div className="mt-2 px-0.5">
+                      <p className="truncate font-mono text-[9px] font-bold text-[#334155]">{jpegFilename(record)}</p>
+                      <p className="mt-0.5 truncate text-[8px] text-[#94a3b8]">{record.sampleType}</p>
                     </div>
                   </button>
                 ))}
               </div>
-
-              <div className="overflow-y-auto p-5">
-                {selectedRecord ? (
-                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_320px]">
-                    <div>
-                      <div className="overflow-hidden rounded-[24px] border border-[#d8e7f0] bg-white/85 p-3">
-                        {previews[selectedRecord.id] ? (
-                          <img src={previews[selectedRecord.id]} alt={selectedRecord.filename} className="aspect-[4/3] w-full rounded-[18px] object-cover" />
-                        ) : (
-                          <div className="flex aspect-[4/3] items-center justify-center rounded-[18px] bg-[#eaf2f6] text-[#7190a1]">
-                            <ImageIcon size={34} />
-                          </div>
-                        )}
-                      </div>
-                      <div className="mt-4 rounded-[22px] border border-[#d8e7f0] bg-white/80 p-4">
-                        <p className="eyebrow">Filename</p>
-                        <p className="mt-2 break-all font-mono text-[13px] font-extrabold text-[#254157]">{jpegFilename(selectedRecord)}</p>
-                        <p className="mt-2 text-[10px] leading-5 text-[#7b91a2]">
-                          Downloads land in the PHOTOS folder as date-site-sampletypecode-grade-sequence.jpg. Double-click the JPG to open it.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="rounded-[22px] border border-[#d8e7f0] bg-white/82 p-4">
-                        <p className="eyebrow">Capture info</p>
-                        <div className="mt-3 grid gap-2">
-                          {[
-                            { label: 'Sample type', value: selectedRecord.sampleType },
-                            { label: 'Grade', value: gradeLabels[selectedRecord.grade] },
-                            { label: 'Collection site', value: selectedRecord.site },
-                            { label: 'Capture date', value: selectedRecord.date },
-                            { label: 'Sequence', value: String(selectedRecord.sequence).padStart(3, '0') },
-                            { label: 'Created at', value: new Date(selectedRecord.createdAt).toLocaleString() },
-                          ].map((item) => (
-                            <div key={item.label} className="rounded-2xl bg-[#f5f9fc] px-3 py-2">
-                              <p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#89a0ae]">{item.label}</p>
-                              <p className="mt-1 text-[11px] font-extrabold text-[#36576c]">{item.value}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        data-testid={`button-delete-record-${selectedRecord.id}`}
-                        onClick={() => onDelete(selectedRecord.id)}
-                        className="focus-ring flex w-full items-center justify-center gap-2 rounded-[18px] border border-[#f0d4c2] bg-[#fff7f1] px-4 py-3 text-[11px] font-extrabold text-[#b0634f] hover:bg-[#fff2ea]"
-                      >
-                        <Trash2 size={15} /> Delete this capture
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </>
+            </div>
           ) : (
-            <div className="col-span-2 flex min-h-[300px] flex-col items-center justify-center text-center">
-              <div className="mb-3 rounded-2xl bg-[#e9f5f9] p-4 text-[#4ca3c5]">
-                <Archive size={28} />
+            <div className="flex min-h-[280px] flex-col items-center justify-center px-6 py-12 text-center">
+              <div className="mb-3 rounded-2xl bg-[#f8fafc] p-4 text-[#94a3b8]">
+                <SlidersHorizontal size={24} />
               </div>
-              <h3 className="text-[14px] font-extrabold text-[#466377]">Nothing captured yet</h3>
-              <p className="mt-1 max-w-[230px] text-[11px] leading-4 text-[#839aa8]">Completed samples will appear here for a quick quality check.</p>
+              <h3 className="text-[14px] font-extrabold text-[#334155]">No samples in this filter</h3>
+              <p className="mt-1 max-w-[240px] text-[11px] leading-4 text-[#94a3b8]">Try another grade or switch back to All.</p>
+              <button type="button" onClick={() => setGradeFilter('All')} className="focus-ring mt-4 rounded-lg border border-[#e2e8f0] bg-white px-4 py-2 text-[10px] font-bold text-[#475569] hover:bg-[#f8fafc]">
+                Show all captures
+              </button>
             </div>
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#e1edf2] bg-[#f0f6f9] px-5 py-3">
-          <span className="text-[10px] text-[#8197a5]">Extract the ZIP, then open PHOTOS. Do not open the CSV as a photo.</span>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#f0f0f0] bg-[#fafafa] px-4 py-3 sm:px-6">
+          <span className="text-[10px] text-[#94a3b8]">
+            {inDetail ? 'Press Back to gallery to browse all captures.' : `${records.length} total · scroll to browse the archive`}
+          </span>
           <div className="flex flex-wrap gap-2">
             <button type="button" data-testid="button-export-json-review" onClick={() => onExport('json')} className="focus-ring flex items-center gap-1.5 rounded-lg border border-[#d1e1e8] bg-white px-3 py-2 text-[10px] font-bold text-[#527084]">
               <Download size={13} /> JSON
@@ -843,7 +920,7 @@ function EndModal({ records, settings, exporting, onClose, onExport, onDownload 
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[.14em] text-white/70">Session wrap</p>
               <h2 className="mt-2 text-[25px] font-extrabold tracking-[-.05em]">Secure the day’s work.</h2>
-              <p className="mt-1 text-[11px] text-white/75">Download the ZIP, extract it, then open the PHOTOS folder. Those files are the sample images.</p>
+              <p className="mt-1 text-[11px] text-white/75">Download the ZIP, extract it, then browse tuncam / date-place / sample type / grade for the photos.</p>
             </div>
             <Archive size={27} className="text-white/80" />
           </div>
@@ -861,7 +938,7 @@ function EndModal({ records, settings, exporting, onClose, onExport, onDownload 
           <ol className="grid gap-2">
             {[
               'Right-click the ZIP → Extract All.',
-              'Open the extracted folder, then open PHOTOS.',
+              'Open tuncam > date-place > Tail-Cut or Sashibo-Core > GradeA (or B / C / Invalid).',
               'Double-click a .jpg to view it. Skip session-manifest.csv — that is a spreadsheet, not a photo.',
             ].map((step, index) => (
               <li key={step} className="flex gap-3 rounded-[14px] border border-[#dceaf1] bg-white/80 px-3 py-2.5">
