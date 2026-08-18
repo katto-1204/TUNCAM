@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   Aperture, Archive, BadgeCheck, Camera, Check, ChevronDown, CircleAlert,
   ClipboardList, CloudOff, Download, FolderOpen, Gauge, HardDrive,
-  Image as ImageIcon, Info, MonitorDown, Pause, Plus, RefreshCw,
+  Image as ImageIcon, Info, Keyboard, MonitorDown, Pause, Plus, RefreshCw,
   ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2,
   Undo2, Upload, UserRound, Video, X, Zap,
 } from 'lucide-react';
@@ -57,6 +57,7 @@ function Tuncam() {
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [isEndOpen, setIsEndOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isShortcutOpen, setIsShortcutOpen] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isAwake, setIsAwake] = useState(false);
@@ -138,6 +139,7 @@ function Tuncam() {
     'Sashibo Core': records.filter((record) => record.sampleType === 'Sashibo Core').length,
     'Tail-Cut': records.filter((record) => record.sampleType === 'Tail-Cut').length,
   }), [records]);
+  const latestRecord = records[0];
   const readyToCapture = Boolean(settings.site && settings.operator.trim() && settings.grader.trim() && settings.sampleType && cameraState === 'ready' && videoReady);
   const currentSequence = records.length ? Math.max(...records.map((record) => record.sequence)) + 1 : 1;
 
@@ -301,12 +303,45 @@ function Tuncam() {
     const handleKeys = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (event.key === '?') {
+        event.preventDefault();
+        setIsShortcutOpen((current) => !current);
+        return;
+      }
+      if (event.key === 'Escape') {
+        if (isShortcutOpen) setIsShortcutOpen(false);
+        else if (isGradeOpen) discardCapture();
+        else if (isReviewOpen) setIsReviewOpen(false);
+        else if (isSettingsOpen) setIsSettingsOpen(false);
+        else if (isEndOpen) setIsEndOpen(false);
+        return;
+      }
       if (isGradeOpen) {
         const index = Number(event.key) - 1;
         if (index >= 0 && index < grades.length) {
           event.preventDefault();
           void finalizeGrade(grades[index]);
         }
+        return;
+      }
+      if (event.key.toLowerCase() === 'r' && records.length) {
+        event.preventDefault();
+        setIsReviewOpen(true);
+        return;
+      }
+      if (event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        setIsSettingsOpen(true);
+        return;
+      }
+      if (event.key.toLowerCase() === 'e' && records.length) {
+        event.preventDefault();
+        setIsEndOpen(true);
+        return;
+      }
+      if (event.key.toLowerCase() === 'u' && records.length) {
+        event.preventDefault();
+        void undoLast();
         return;
       }
       if (event.code === 'Space' && readyToCapture && !isEndOpen && !isReviewOpen && !isSettingsOpen) {
@@ -316,7 +351,7 @@ function Tuncam() {
     };
     window.addEventListener('keydown', handleKeys);
     return () => window.removeEventListener('keydown', handleKeys);
-  }, [captureFrame, finalizeGrade, isEndOpen, isGradeOpen, isReviewOpen, isSettingsOpen, readyToCapture]);
+  }, [captureFrame, discardCapture, finalizeGrade, isEndOpen, isGradeOpen, isReviewOpen, isSettingsOpen, isShortcutOpen, readyToCapture, records.length]);
 
   const undoLast = async () => {
     if (!records.length) return;
@@ -475,15 +510,29 @@ function Tuncam() {
           <div className="hidden items-center gap-5 lg:flex">
             <StatusChip icon={<CloudOff size={14} />} label="Offline ready" tone="cyan" />
             <StatusChip icon={<ShieldCheck size={14} />} label="Local only" tone="green" />
+            <StatusChip icon={<Keyboard size={14} />} label="Shortcuts ready" tone="violet" />
             <span className="h-7 w-px bg-[#dbe8ef]" />
             <div className="text-right"><p className="eyebrow">Session date</p><p className="mono text-[12px] font-medium text-[#34536a]">{today()}</p></div>
           </div>
           <div className="flex items-center gap-2">
             {installPrompt && <button type="button" data-testid="button-install-app" onClick={installApp} className="focus-ring hidden items-center gap-2 rounded-xl border border-[#b9ddea] bg-white/80 px-3 py-2 text-[11px] font-bold text-[#1579a8] sm:flex"><Download size={14} /> Install</button>}
+            <button type="button" onClick={() => setIsShortcutOpen(true)} className="focus-ring hidden items-center gap-2 rounded-xl border border-[#dedcf7] bg-white/80 px-3 py-2 text-[11px] font-bold text-[#5d56b5] md:flex"><Keyboard size={14} /> Shortcuts</button>
             <button type="button" data-testid="button-open-settings" onClick={() => setIsSettingsOpen(true)} className="focus-ring flex size-9 items-center justify-center rounded-xl border border-[#d7e7ef] bg-white/80 text-[#628096] transition hover:bg-white hover:text-[#167db0]" aria-label="Open session tools"><Settings2 size={17} /></button>
             <div className="hidden size-9 items-center justify-center rounded-xl bg-[#e7f0f6] text-[11px] font-extrabold text-[#3b5c75] sm:flex">{settings.operator ? settings.operator.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() : 'OP'}</div>
           </div>
         </header>
+        <section className="shortcut-strip mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[20px] px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <ShortcutPill keys="Space" label="Capture" />
+            <ShortcutPill keys="1 2 3 4" label="Grade" />
+            <ShortcutPill keys="R" label="Review" />
+            <ShortcutPill keys="U" label="Undo" />
+            <ShortcutPill keys="?" label="Help" />
+          </div>
+          <div className="text-[10px] font-bold text-[#667f92]">
+            {latestRecord ? `Last saved: ${latestRecord.filename}` : 'No captures yet. Frame the sample and press Space.'}
+          </div>
+        </section>
 
         <section className="mt-3 grid gap-3 xl:grid-cols-[270px_minmax(420px,1fr)_322px] lg:grid-cols-[245px_minmax(380px,1fr)_285px]">
           <aside className="soft-card rounded-[22px] p-4">
@@ -499,9 +548,9 @@ function Tuncam() {
             <div className={`mt-4 rounded-[15px] border px-3 py-2.5 ${readyToCapture ? 'border-[#bde7da] bg-[#f0fbf7]' : 'border-[#e2edf2] bg-[#f8fbfc]'}`}><div className="flex items-center gap-2"><span className={`size-2 rounded-full ${readyToCapture ? 'status-breathe bg-[#29b685]' : 'bg-[#c6d5de]'}`} /><span className="text-[11px] font-bold text-[#49677b]">{readyToCapture ? 'Ready for manual capture' : 'Complete required fields'}</span></div><p className="mt-1 text-[10px] leading-4 text-[#8198a8]">{readyToCapture ? 'Nothing auto-captures. Press Capture or Spacebar when the sample is framed.' : 'Site, operator, grader, sample type and a connected camera are required.'}</p></div>
           </aside>
 
-          <section className="soft-card min-w-0 rounded-[22px] p-3 sm:p-4">
+          <section className="soft-card stage-card min-w-0 rounded-[22px] p-3 sm:p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><p className="eyebrow">02 / Live view</p><div className="mt-1 flex items-center gap-2"><h2 className="text-[16px] font-extrabold tracking-[-.03em] text-[#203c53]">Imaging chamber</h2><span className={`rounded-full px-2 py-1 text-[9px] font-extrabold uppercase tracking-[.08em] ${cameraState === 'ready' ? 'bg-[#e5f8f2] text-[#238866]' : cameraState === 'idle' ? 'bg-[#edf1ff] text-[#3658c4]' : 'bg-[#fff3e8] text-[#bc7449]'}`}>{cameraState === 'ready' ? 'Live feed' : cameraState === 'loading' ? 'Connecting' : cameraState === 'idle' ? 'Not connected' : cameraState === 'denied' ? 'Permission needed' : 'No camera'}</span></div></div><div className="flex items-center gap-2"><button type="button" data-testid="button-refresh-camera" onClick={() => { setSelectedDevice(''); void connectCamera(''); }} className="focus-ring flex size-8 items-center justify-center rounded-lg border border-[#dce9ef] bg-white/80 text-[#6e899b] hover:text-[#3658c4]" aria-label="Connect or refresh camera"><RefreshCw size={14} /></button><select data-testid="select-camera-device" value={selectedDevice} onChange={(event) => { const deviceId = event.target.value; setSelectedDevice(deviceId); void connectCamera(deviceId); }} className="h-8 max-w-[140px] rounded-lg border border-[#dce9ef] bg-white/80 px-2 text-[10px] text-[#587185]" aria-label="Camera device"><option value="">Default camera</option>{devices.map((device, index) => <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}</select></div></div>
-            <div className={`relative aspect-[16/10] min-h-[290px] overflow-hidden rounded-[18px] bg-[#dce9ee] ${isCapturing ? 'capture-pulse' : ''}`}>
+            <div className={`relative aspect-[16/10] min-h-[290px] overflow-hidden rounded-[22px] bg-[#dce9ee] ${isCapturing ? 'capture-pulse' : ''}`}>
               {cameraState === 'ready' ? <video ref={videoRef} muted playsInline onLoadedMetadata={() => setVideoReady(true)} className="absolute inset-0 size-full object-cover" data-testid="video-camera-preview" /> : <CameraEmpty state={cameraState} issue={cameraIssue} onRetry={() => void connectCamera()} />}
               {cameraState === 'ready' && (
                 <>
@@ -521,14 +570,14 @@ function Tuncam() {
             <canvas ref={canvasRef} className="hidden" />
             <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
               <div className="hidden items-center gap-2 sm:flex"><div className="rounded-lg bg-[#eaf5fa] p-2 text-[#3b9fca]"><ScanLine size={15} /></div><div><p className="text-[10px] font-bold text-[#4b687d]">Framing guide only</p><p className="text-[9px] text-[#8ca1af]">Capture happens when you press the button</p></div></div>
-              <button type="button" data-testid="button-capture" disabled={!readyToCapture} onClick={captureFrame} className={`focus-ring group relative flex h-[62px] min-w-[170px] items-center justify-center gap-3 rounded-[18px] px-5 text-white shadow-[0_12px_22px_rgba(27,142,204,.25)] transition hover:-translate-y-0.5 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 ${readyToCapture ? 'blue-sheen' : 'bg-[#afc6d2]'}`}><span className="flex size-9 items-center justify-center rounded-xl border border-white/30 bg-white/15"><Camera size={19} /></span><span className="text-left"><span className="block text-[12px] font-extrabold">Capture sample</span><span className="mono block text-[9px] opacity-80">SPACEBAR</span></span></button>
+              <button type="button" data-testid="button-capture" disabled={!readyToCapture} onClick={captureFrame} className={`capture-button focus-ring group relative flex h-[64px] min-w-[190px] items-center justify-center gap-3 rounded-[20px] px-5 text-white transition hover:-translate-y-0.5 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 ${readyToCapture ? 'blue-sheen' : 'bg-[#afc6d2]'}`}><span className="flex size-9 items-center justify-center rounded-xl border border-white/30 bg-white/15"><Camera size={19} /></span><span className="text-left"><span className="block text-[12px] font-extrabold">Capture sample</span><span className="mono block text-[9px] opacity-80">SPACEBAR</span></span></button>
               <div className="flex justify-end"><button type="button" data-testid="button-undo-last" disabled={!records.length} onClick={() => void undoLast()} className="focus-ring flex items-center gap-2 rounded-xl border border-[#d8e7ee] bg-white/70 px-3 py-2.5 text-[10px] font-bold text-[#617b8d] hover:bg-white disabled:opacity-40"><Undo2 size={14} /> <span className="hidden sm:inline">Undo last</span></button></div>
             </div>
             {!readyToCapture && <p className="mt-2 text-center text-[10px] text-[#8aa0ae]">Press Connect camera, fill the required fields, pick a sample type, then capture manually.</p>}
           </section>
 
           <aside className="space-y-3">
-            <div className="soft-card rounded-[22px] p-4"><div className="flex items-start justify-between"><div><p className="eyebrow">03 / Session pulse</p><h2 className="mt-1 text-[16px] font-extrabold tracking-[-.03em] text-[#203c53]">Today’s tally</h2></div><div className="blue-sheen rounded-xl p-2 text-white"><Gauge size={17} /></div></div><div className="mt-4 grid grid-cols-4 gap-1.5">{grades.map((grade) => <div key={grade} className="rounded-xl bg-[#f5f9fb] px-2 py-2.5 text-center"><div className="mx-auto mb-1 flex size-6 items-center justify-center rounded-lg text-[11px] font-extrabold text-white" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</div><p data-testid={`text-count-${grade.toLowerCase()}`} className="mono text-[18px] font-medium text-[#24435a]">{counts[grade]}</p><p className="mt-0.5 text-[8px] font-bold uppercase tracking-[.06em] text-[#91a6b3]">{grade === 'Invalid' ? 'bad' : 'grade'}</p></div>)}</div><div className="mt-3 flex items-center justify-between border-t border-[#e6eef3] pt-3"><span className="text-[11px] font-bold text-[#577286]">Total captured</span><span data-testid="text-total-captured" className="mono text-[18px] font-medium text-[#1c75ac]">{records.length.toString().padStart(3, '0')}</span></div></div>
+            <div className="soft-card rounded-[22px] p-4"><div className="flex items-start justify-between"><div><p className="eyebrow">03 / Session pulse</p><h2 className="mt-1 text-[16px] font-extrabold tracking-[-.03em] text-[#203c53]">Today’s tally</h2></div><div className="blue-sheen rounded-xl p-2 text-white"><Gauge size={17} /></div></div><div className="mt-4 grid grid-cols-4 gap-1.5">{grades.map((grade) => <div key={grade} className="rounded-xl bg-[#f5f9fb] px-2 py-2.5 text-center"><div className="mx-auto mb-1 flex size-6 items-center justify-center rounded-lg text-[11px] font-extrabold text-white" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</div><p data-testid={`text-count-${grade.toLowerCase()}`} className="mono text-[18px] font-medium text-[#24435a]">{counts[grade]}</p><p className="mt-0.5 text-[8px] font-bold uppercase tracking-[.06em] text-[#91a6b3]">{grade === 'Invalid' ? 'bad' : 'grade'}</p></div>)}</div><div className="mt-3 flex items-center justify-between border-t border-[#e6eef3] pt-3"><span className="text-[11px] font-bold text-[#577286]">Total captured</span><span data-testid="text-total-captured" className="mono text-[18px] font-medium text-[#1c75ac]">{records.length.toString().padStart(3, '0')}</span></div>{latestRecord && <div className="mt-3 rounded-2xl border border-[#d7e8f3] bg-white/70 p-3"><p className="eyebrow">Last capture</p><p className="mt-1 truncate text-[11px] font-extrabold text-[#36576c]">{latestRecord.filename}</p><p className="mt-1 text-[10px] text-[#7f95a5]">{latestRecord.sampleType} · {gradeLabels[latestRecord.grade]}</p></div>}</div>
             <div className="soft-card rounded-[22px] p-4"><div className="flex items-center justify-between"><div><p className="eyebrow">Progress / target 800</p><p className="mt-1 text-[12px] font-bold text-[#426278]">Class balance</p></div><SlidersHorizontal size={16} className="text-[#78a1b7]" /></div><div className="mt-3 space-y-3">{(['Sashibo Core', 'Tail-Cut'] as SampleType[]).map((type) => <div key={type}><div className="mb-1.5 flex items-center justify-between text-[10px]"><span className="font-bold text-[#5c7587]">{type}</span><span className="mono text-[#849aa8]">{typeCounts[type]} / 3,200</span></div><div className="h-2 overflow-hidden rounded-full bg-[#e5eff4]"><div className="h-full rounded-full bg-gradient-to-r from-[#39b9e7] to-[#4a78df] transition-all duration-500" style={{ width: `${Math.min(100, typeCounts[type] / 32)}%` }} /></div></div>)}</div></div>
             <div className="soft-card rounded-[22px] p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><HardDrive size={16} className={storageStatus.low ? 'text-[#d8796e]' : 'text-[#3c9cbb]'} /><span className="text-[11px] font-extrabold text-[#466479]">Local storage</span></div><span className={`rounded-full px-2 py-1 text-[9px] font-bold ${storageStatus.low ? 'bg-[#fff0ed] text-[#bd685f]' : 'bg-[#ebf8f4] text-[#2e8c70]'}`}>{storageStatus.low ? 'Review soon' : 'Healthy'}</span></div><p className="mt-2 text-[10px] leading-4 text-[#8499a8]">{storageStatus.quota ? `${formatBytes(storageStatus.used || 0)} used of ${formatBytes(storageStatus.quota)} browser quota.` : 'Browser storage estimate will appear when supported.'}</p>{storageStatus.low && <div className="mt-2 flex gap-2 rounded-lg bg-[#fff5f1] p-2 text-[10px] text-[#ae6259]"><CircleAlert size={14} className="shrink-0" /> Download the dataset ZIP and copy it to a backup drive.</div>}</div>
             <div className="grid grid-cols-2 gap-2">
@@ -545,13 +594,17 @@ function Tuncam() {
       {isReviewOpen && <ReviewModal records={records} previews={previews} exporting={isExporting} onClose={() => setIsReviewOpen(false)} onDelete={(id) => void deleteRecord(id)} onExport={exportManifest} onDownload={() => void exportDataset()} />}
       {isEndOpen && <EndModal records={records} settings={settings} exporting={isExporting} onClose={() => setIsEndOpen(false)} onExport={exportManifest} onDownload={() => void exportDataset()} />}
       {isSettingsOpen && <ToolsModal settings={settings} onClose={() => setIsSettingsOpen(false)} onInstall={installPrompt ? installApp : undefined} />}
+      {isShortcutOpen && <ShortcutModal onClose={() => setIsShortcutOpen(false)} />}
       <div className="fixed bottom-4 left-1/2 z-50 flex w-[min(92vw,390px)] -translate-x-1/2 flex-col gap-2">{toasts.map((toast) => <div key={toast.id} className={`toast-in flex items-center gap-2 rounded-xl border px-3 py-2.5 text-[11px] font-bold shadow-[0_12px_30px_rgba(38,80,112,.16)] ${toast.tone === 'success' ? 'border-[#b9e8d7] bg-[#f0fbf7] text-[#267f69]' : toast.tone === 'warning' ? 'border-[#f0d4c2] bg-[#fff7f1] text-[#a66b54]' : 'border-[#c8e4ee] bg-white text-[#4c6c80]'}`}><Info size={14} /> {toast.message}</div>)}</div>
     </div>
   );
 }
 
-function StatusChip({ icon, label, tone }: { icon: ReactNode; label: string; tone: 'cyan' | 'green' }) {
-  return <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[10px] font-bold ${tone === 'cyan' ? 'bg-[#e8f7fc] text-[#2483ac]' : 'bg-[#eaf8f3] text-[#2a8b6c]'}`}>{icon}{label}</span>;
+function StatusChip({ icon, label, tone }: { icon: ReactNode; label: string; tone: 'cyan' | 'green' | 'violet' }) {
+  return <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[10px] font-bold ${tone === 'cyan' ? 'bg-[#e8f7fc] text-[#2483ac]' : tone === 'green' ? 'bg-[#eaf8f3] text-[#2a8b6c]' : 'bg-[#f0ecff] text-[#6656c1]'}`}>{icon}{label}</span>;
+}
+function ShortcutPill({ keys, label }: { keys: string; label: string }) {
+  return <span className="flex items-center gap-2 rounded-full border border-[#dce8f1] bg-white/85 px-3 py-1.5 text-[10px] font-bold text-[#527084]"><span className="mono rounded-md bg-[#eef4ff] px-1.5 py-0.5 text-[9px] text-[#4960ce]">{keys}</span>{label}</span>;
 }
 function SampleOption({ value, selected, onClick, code }: { value: SampleType; selected: boolean; onClick: () => void; code: string }) {
   return <button type="button" data-testid={`button-sample-${code.toLowerCase()}`} onClick={onClick} className={`focus-ring rounded-xl border p-2.5 text-left transition ${selected ? 'border-[#53b9df] bg-[#e9f8fc] shadow-[0_4px_12px_rgba(47,163,207,.1)]' : 'border-[#d9e6ed] bg-white/60 hover:bg-white'}`}><div className="flex items-center justify-between"><span className={`flex size-6 items-center justify-center rounded-lg text-[9px] font-extrabold ${selected ? 'blue-sheen text-white' : 'bg-[#eaf2f6] text-[#658196]'}`}>{code}</span>{selected && <Check size={14} className="text-[#1a9bcb]" />}</div><p className="mt-2 text-[10px] font-extrabold text-[#47647a]">{value}</p></button>;
@@ -565,13 +618,176 @@ function GradeModal({ image, onSelect, onCancel }: { image?: string; onSelect: (
   return <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#18354a]/45 p-4 backdrop-blur-sm"><div className="modal-in w-full max-w-[620px] overflow-hidden rounded-[24px] border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.28)]"><div className="flex items-start justify-between border-b border-[#e4edf2] px-5 py-4 sm:px-6"><div><p className="eyebrow text-[#288bab]">Capture held · label required</p><h2 className="mt-1 text-[20px] font-extrabold tracking-[-.04em] text-[#1f3c52]">How would you grade this sample?</h2><p className="mt-1 text-[11px] text-[#77909e]">Choose one label to save the image and continue.</p></div><div className="rounded-xl bg-[#eaf7fb] p-2 text-[#299ac4]"><ClipboardList size={18} /></div></div><div className="grid gap-4 p-5 sm:grid-cols-[160px_1fr] sm:p-6">{image ? <img src={image} alt="Captured tuna sample awaiting grade" className="aspect-square w-full rounded-[15px] border border-[#dbe8ee] object-cover" /> : <div className="flex aspect-square items-center justify-center rounded-[15px] bg-[#eaf1f5] text-[#7a98aa]"><ImageIcon /></div>}<div className="grid grid-cols-2 gap-2.5">{grades.map((grade, index) => <button type="button" key={grade} data-testid={`button-grade-${grade.toLowerCase()}`} onClick={() => onSelect(grade)} className="focus-ring group flex min-h-[86px] flex-col items-start justify-between rounded-[15px] border border-[#d8e6ed] bg-white p-3 text-left shadow-[0_4px_12px_rgba(38,83,109,.04)] transition hover:-translate-y-0.5 hover:border-[#7dc8e1] hover:shadow-[0_9px_20px_rgba(38,83,109,.11)]"><div className="flex w-full items-center justify-between"><span className="flex size-8 items-center justify-center rounded-xl text-[13px] font-extrabold text-white" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</span><span className="mono text-[10px] text-[#a0b1bb]">{index + 1}</span></div><span className="text-[11px] font-extrabold text-[#486579]">{gradeLabels[grade]}</span></button>)}</div></div><div className="flex items-center justify-between bg-[#f0f6f9] px-5 py-3 text-[10px] text-[#78909e] sm:px-6"><span className="flex items-center gap-2"><Zap size={13} className="text-[#2aa4ce]" /> Keyboard ready: 1 / 2 / 3 / 4</span><button type="button" data-testid="button-cancel-capture" onClick={onCancel} className="focus-ring font-bold text-[#6d8493] hover:text-[#287a9f]">Discard frame</button></div></div></div>;
 }
 function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport, onDownload }: { records: RecordItem[]; previews: Record<string, string>; exporting: boolean; onClose: () => void; onDelete: (id: string) => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
-  return <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#18354a]/40 p-4 backdrop-blur-sm"><div className="modal-in flex max-h-[min(760px,90dvh)] w-full max-w-[800px] flex-col overflow-hidden rounded-[24px] border border-white/70 bg-[#f8fbfc] shadow-[0_25px_80px_rgba(20,58,86,.24)]"><div className="flex items-center justify-between border-b border-[#e1edf2] px-5 py-4"><div><p className="eyebrow">Session review</p><h2 className="mt-1 text-[18px] font-extrabold text-[#203e54]">Captured samples <span className="mono text-[#298db6]">{records.length}</span></h2></div><div className="flex items-center gap-2"><button type="button" data-testid="button-export-csv-review" onClick={() => onExport('csv')} className="focus-ring hidden items-center gap-1.5 rounded-lg border border-[#d3e4eb] bg-white px-2.5 py-2 text-[10px] font-bold text-[#527084] sm:flex"><Download size={13} /> CSV</button><button type="button" data-testid="button-close-review" onClick={onClose} className="focus-ring rounded-lg p-2 text-[#78919f] hover:bg-white"><X size={18} /></button></div></div><div className="flex-1 overflow-y-auto p-5">{records.length ? <div className="grid gap-2.5 sm:grid-cols-2">{records.map((record) => <div key={record.id} data-testid={`card-record-${record.id}`} className="flex items-center gap-3 rounded-[15px] border border-[#dce9ef] bg-white/75 p-2.5">{previews[record.id] ? <img src={previews[record.id]} alt={`${record.sampleType}, ${gradeLabels[record.grade]}`} className="size-16 rounded-xl object-cover" /> : <div className="flex size-16 items-center justify-center rounded-xl bg-[#eaf2f6] text-[#7190a1]"><ImageIcon size={20} /></div>}<div className="min-w-0 flex-1"><p className="truncate text-[10px] font-extrabold text-[#36576c]">{record.filename}</p><p className="mt-1 text-[9px] text-[#8198a6]">{record.sampleType} · {record.site}</p><span className="mt-1.5 inline-flex rounded-full px-2 py-0.5 text-[9px] font-extrabold text-white" style={{ background: gradeColors[record.grade] }}>{gradeLabels[record.grade]}</span></div><button type="button" data-testid={`button-delete-record-${record.id}`} onClick={() => onDelete(record.id)} className="focus-ring rounded-lg p-2 text-[#a6b6bf] hover:bg-[#fff0ed] hover:text-[#c86e66]" aria-label={`Delete ${record.filename}`}><Trash2 size={15} /></button></div>)}</div> : <div className="flex min-h-[300px] flex-col items-center justify-center text-center"><div className="mb-3 rounded-2xl bg-[#e9f5f9] p-4 text-[#4ca3c5]"><Archive size={28} /></div><h3 className="text-[14px] font-extrabold text-[#466377]">Nothing captured yet</h3><p className="mt-1 max-w-[230px] text-[11px] leading-4 text-[#839aa8]">Completed samples will appear here for a quick quality check.</p></div>}</div><div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#e1edf2] bg-[#f0f6f9] px-5 py-3"><span className="text-[10px] text-[#8197a5]">Images stay on this device until you download the dataset ZIP.</span><div className="flex flex-wrap gap-2"><button type="button" data-testid="button-export-json-review" onClick={() => onExport('json')} className="focus-ring flex items-center gap-1.5 rounded-lg border border-[#d1e1e8] bg-white px-3 py-2 text-[10px] font-bold text-[#527084]"><Download size={13} /> JSON</button><button type="button" data-testid="button-download-dataset-review" disabled={!records.length || exporting} onClick={onDownload} className="focus-ring flex items-center gap-1.5 rounded-lg bg-[#214e69] px-3 py-2 text-[10px] font-extrabold text-white disabled:opacity-40"><FolderOpen size={13} /> Folders + images</button><button type="button" data-testid="button-done-review" onClick={onClose} className="focus-ring rounded-lg border border-[#d1e1e8] bg-white px-4 py-2 text-[10px] font-extrabold text-[#214e69]">Done</button></div></div></div></div>;
+  const [selectedId, setSelectedId] = useState(records[0]?.id ?? '');
+
+  useEffect(() => {
+    if (!records.length) {
+      setSelectedId('');
+      return;
+    }
+    if (!records.some((record) => record.id === selectedId)) {
+      setSelectedId(records[0].id);
+    }
+  }, [records, selectedId]);
+
+  const selectedRecord = records.find((record) => record.id === selectedId) ?? records[0];
+
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#18354a]/45 p-4 backdrop-blur-sm">
+      <div className="modal-in flex max-h-[min(840px,92dvh)] w-full max-w-[1120px] flex-col overflow-hidden rounded-[28px] border border-white/70 bg-[#f8fbfc] shadow-[0_25px_80px_rgba(20,58,86,.24)]">
+        <div className="flex items-center justify-between border-b border-[#e1edf2] px-5 py-4">
+          <div>
+            <p className="eyebrow">Session review</p>
+            <h2 className="mt-1 text-[18px] font-extrabold text-[#203e54]">
+              Captured samples <span className="mono text-[#298db6]">{records.length}</span>
+            </h2>
+            <p className="mt-1 text-[10px] text-[#7f95a5]">Click an image to inspect full details and metadata.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" data-testid="button-export-csv-review" onClick={() => onExport('csv')} className="focus-ring hidden items-center gap-1.5 rounded-lg border border-[#d3e4eb] bg-white px-2.5 py-2 text-[10px] font-bold text-[#527084] sm:flex">
+              <Download size={13} /> CSV
+            </button>
+            <button type="button" data-testid="button-close-review" onClick={onClose} className="focus-ring rounded-lg p-2 text-[#78919f] hover:bg-white">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid flex-1 gap-0 lg:grid-cols-[340px_minmax(0,1fr)]">
+          {records.length ? (
+            <>
+              <div className="review-rail overflow-y-auto border-b border-[#e1edf2] p-4 lg:border-b-0 lg:border-r">
+                {records.map((record) => (
+                  <button
+                    type="button"
+                    key={record.id}
+                    data-testid={`card-record-${record.id}`}
+                    onClick={() => setSelectedId(record.id)}
+                    className={`review-card focus-ring mb-3 flex w-full items-center gap-3 rounded-[18px] border p-3 text-left transition ${selectedRecord?.id === record.id ? 'border-[#92c8ee] bg-[#eef8ff]' : 'border-[#dce9ef] bg-white/82 hover:border-[#b9dbed] hover:bg-white'}`}
+                  >
+                    {previews[record.id] ? (
+                      <img src={previews[record.id]} alt={`${record.sampleType}, ${gradeLabels[record.grade]}`} className="size-20 rounded-[14px] object-cover" />
+                    ) : (
+                      <div className="flex size-20 items-center justify-center rounded-[14px] bg-[#eaf2f6] text-[#7190a1]">
+                        <ImageIcon size={20} />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[10px] font-extrabold text-[#36576c]">{record.filename}</p>
+                      <p className="mt-1 text-[9px] text-[#8198a6]">{record.sampleType} · {record.site}</p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="inline-flex rounded-full px-2 py-0.5 text-[9px] font-extrabold text-white" style={{ background: gradeColors[record.grade] }}>
+                          {gradeLabels[record.grade]}
+                        </span>
+                        <span className="mono text-[9px] text-[#8ca1af]">#{String(record.sequence).padStart(3, '0')}</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="overflow-y-auto p-5">
+                {selectedRecord ? (
+                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_320px]">
+                    <div>
+                      <div className="overflow-hidden rounded-[24px] border border-[#d8e7f0] bg-white/85 p-3">
+                        {previews[selectedRecord.id] ? (
+                          <img src={previews[selectedRecord.id]} alt={selectedRecord.filename} className="aspect-[4/3] w-full rounded-[18px] object-cover" />
+                        ) : (
+                          <div className="flex aspect-[4/3] items-center justify-center rounded-[18px] bg-[#eaf2f6] text-[#7190a1]">
+                            <ImageIcon size={34} />
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-4 rounded-[22px] border border-[#d8e7f0] bg-white/80 p-4">
+                        <p className="eyebrow">Filename</p>
+                        <p className="mt-2 break-all text-[13px] font-extrabold text-[#254157]">{selectedRecord.filename}</p>
+                        <p className="mt-2 text-[10px] leading-5 text-[#7b91a2]">
+                          This image is stored locally and exported into its date / sample type / grade folder when you download the dataset ZIP.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="rounded-[22px] border border-[#d8e7f0] bg-white/82 p-4">
+                        <p className="eyebrow">Capture info</p>
+                        <div className="mt-3 grid gap-2">
+                          {[
+                            { label: 'Sample type', value: selectedRecord.sampleType },
+                            { label: 'Grade', value: gradeLabels[selectedRecord.grade] },
+                            { label: 'Collection site', value: selectedRecord.site },
+                            { label: 'Capture date', value: selectedRecord.date },
+                            { label: 'Sequence', value: String(selectedRecord.sequence).padStart(3, '0') },
+                            { label: 'Created at', value: new Date(selectedRecord.createdAt).toLocaleString() },
+                          ].map((item) => (
+                            <div key={item.label} className="rounded-2xl bg-[#f5f9fc] px-3 py-2">
+                              <p className="text-[9px] font-bold uppercase tracking-[.08em] text-[#89a0ae]">{item.label}</p>
+                              <p className="mt-1 text-[11px] font-extrabold text-[#36576c]">{item.value}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        data-testid={`button-delete-record-${selectedRecord.id}`}
+                        onClick={() => onDelete(selectedRecord.id)}
+                        className="focus-ring flex w-full items-center justify-center gap-2 rounded-[18px] border border-[#f0d4c2] bg-[#fff7f1] px-4 py-3 text-[11px] font-extrabold text-[#b0634f] hover:bg-[#fff2ea]"
+                      >
+                        <Trash2 size={15} /> Delete this capture
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <div className="col-span-2 flex min-h-[300px] flex-col items-center justify-center text-center">
+              <div className="mb-3 rounded-2xl bg-[#e9f5f9] p-4 text-[#4ca3c5]">
+                <Archive size={28} />
+              </div>
+              <h3 className="text-[14px] font-extrabold text-[#466377]">Nothing captured yet</h3>
+              <p className="mt-1 max-w-[230px] text-[11px] leading-4 text-[#839aa8]">Completed samples will appear here for a quick quality check.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#e1edf2] bg-[#f0f6f9] px-5 py-3">
+          <span className="text-[10px] text-[#8197a5]">Images stay on this device until you download the dataset ZIP.</span>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" data-testid="button-export-json-review" onClick={() => onExport('json')} className="focus-ring flex items-center gap-1.5 rounded-lg border border-[#d1e1e8] bg-white px-3 py-2 text-[10px] font-bold text-[#527084]">
+              <Download size={13} /> JSON
+            </button>
+            <button type="button" data-testid="button-download-dataset-review" disabled={!records.length || exporting} onClick={onDownload} className="focus-ring flex items-center gap-1.5 rounded-lg bg-[#214e69] px-3 py-2 text-[10px] font-extrabold text-white disabled:opacity-40">
+              <FolderOpen size={13} /> Folders + images
+            </button>
+            <button type="button" data-testid="button-done-review" onClick={onClose} className="focus-ring rounded-lg border border-[#d1e1e8] bg-white px-4 py-2 text-[10px] font-extrabold text-[#214e69]">
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 function EndModal({ records, settings, exporting, onClose, onExport, onDownload }: { records: RecordItem[]; settings: SessionSettings; exporting: boolean; onClose: () => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
   return <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#18354a]/40 p-4 backdrop-blur-sm"><div className="modal-in w-full max-w-[530px] overflow-hidden rounded-[24px] border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.24)]"><div className="blue-sheen p-6 text-white"><div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.14em] text-white/70">Session wrap</p><h2 className="mt-2 text-[25px] font-extrabold tracking-[-.05em]">Secure the day’s work.</h2><p className="mt-1 text-[11px] text-white/75">Download the image folders first. CSV and JSON are included in the ZIP and also available separately.</p></div><Archive size={27} className="text-white/80" /></div></div><div className="space-y-4 p-6"><div className="grid grid-cols-3 gap-2">{[['Samples', records.length], ['Operator', settings.operator || '—'], ['Grader', settings.grader || '—']].map(([label, value]) => <div key={String(label)} className="rounded-xl bg-[#eef6f9] p-3"><p className="eyebrow">{label}</p><p className="mt-1 truncate text-[12px] font-extrabold text-[#38566a]">{value}</p></div>)}</div><div className="flex gap-3 rounded-[15px] border border-[#f0d9c8] bg-[#fff8f2] p-3.5"><Upload size={17} className="mt-0.5 shrink-0 text-[#d08362]" /><div><p className="text-[11px] font-extrabold text-[#805846]">Backup reminder</p><p className="mt-1 text-[10px] leading-4 text-[#9e7662]">Copy today’s ZIP or folder to a USB drive before leaving the landing center.</p></div></div><button type="button" data-testid="button-download-dataset-end" disabled={!records.length || exporting} onClick={onDownload} className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl bg-[#214e69] py-3.5 text-[12px] font-extrabold text-white disabled:opacity-40"><FolderOpen size={16} />{exporting ? 'Packing folders and images…' : 'Download folders + images'}</button><div className="flex gap-2"><button type="button" data-testid="button-export-csv-end" onClick={() => onExport('csv')} className="focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#cfe1e9] bg-white py-3 text-[11px] font-extrabold text-[#4f7185]"><Download size={15} /> CSV</button><button type="button" data-testid="button-export-json-end" onClick={() => onExport('json')} className="focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#cfe1e9] bg-white py-3 text-[11px] font-extrabold text-[#4f7185]"><Download size={15} /> JSON</button></div><button type="button" data-testid="button-close-end" onClick={onClose} className="focus-ring w-full rounded-xl border border-[#d5e5ee] bg-white py-3 text-[11px] font-extrabold text-[#214e69]">Continue session</button></div></div></div>;
 }
 function ToolsModal({ settings, onClose, onInstall }: { settings: SessionSettings; onClose: () => void; onInstall?: () => Promise<void> }) {
   return <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#18354a]/40 p-4 backdrop-blur-sm"><div className="modal-in w-full max-w-[460px] rounded-[24px] border border-white/70 bg-[#f9fcfd] p-6 shadow-[0_25px_80px_rgba(20,58,86,.24)]"><div className="flex items-start justify-between"><div><p className="eyebrow">Session tools</p><h2 className="mt-1 text-[19px] font-extrabold text-[#203e54]">Field instrument</h2></div><button type="button" data-testid="button-close-tools" onClick={onClose} className="focus-ring rounded-lg p-2 text-[#78919f] hover:bg-white"><X size={18} /></button></div><div className="mt-5 space-y-2"><ToolRow icon={<CloudOff size={16} />} title="Offline-first storage" detail="Captures stay in this browser and optional local folder." /><ToolRow icon={<ShieldCheck size={16} />} title="No auto-detect" detail="Camera and shutter are manual only. Nothing captures itself." /><ToolRow icon={<FolderOpen size={16} />} title="Folder access" detail={settings.storage} /></div>{onInstall && <button type="button" data-testid="button-install-tools" onClick={onInstall} className="focus-ring mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#e7f6fb] py-3 text-[11px] font-extrabold text-[#257d9f]"><Download size={15} /> Install TUNCAM on this device</button>}<button type="button" data-testid="button-done-tools" onClick={onClose} className="focus-ring mt-2 w-full rounded-xl bg-[#214e69] py-3 text-[11px] font-extrabold text-white">Done</button></div></div>;
+}
+function ShortcutModal({ onClose }: { onClose: () => void }) {
+  const items = [
+    ['Space', 'Capture a sample'],
+    ['1 / 2 / 3 / 4', 'Assign Grade A / B / C / Invalid'],
+    ['R', 'Open review gallery'],
+    ['U', 'Undo last capture'],
+    ['S', 'Open session tools'],
+    ['E', 'Open end session panel'],
+    ['Esc', 'Close the current modal'],
+    ['?', 'Show shortcuts help'],
+  ];
+  return <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#18354a]/45 p-4 backdrop-blur-sm"><div className="modal-in w-full max-w-[560px] overflow-hidden rounded-[26px] border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.24)]"><div className="flex items-center justify-between border-b border-[#e1edf2] px-5 py-4"><div><p className="eyebrow">Keyboard shortcuts</p><h2 className="mt-1 text-[18px] font-extrabold text-[#203e54]">Faster field workflow</h2></div><button type="button" onClick={onClose} className="focus-ring rounded-lg p-2 text-[#78919f] hover:bg-white"><X size={18} /></button></div><div className="grid gap-2 p-5">{items.map(([key, description]) => <div key={key} className="flex items-center justify-between rounded-[18px] border border-[#dde9f1] bg-white/80 px-4 py-3"><span className="text-[11px] font-bold text-[#49677b]">{description}</span><span className="mono rounded-lg bg-[#eef4ff] px-2 py-1 text-[10px] font-bold text-[#4e63cf]">{key}</span></div>)}</div><div className="border-t border-[#e1edf2] bg-[#f0f6f9] px-5 py-3 text-[10px] text-[#7f95a5]">Capture stays manual. Shortcuts only speed up actions you explicitly trigger.</div></div></div>;
 }
 function ToolRow({ icon, title, detail }: { icon: ReactNode; title: string; detail: string }) {
   return <div className="flex items-center gap-3 rounded-xl border border-[#deebf0] bg-white/70 p-3"><div className="rounded-lg bg-[#eaf6fa] p-2 text-[#3b9dbc]">{icon}</div><div className="min-w-0"><p className="text-[11px] font-extrabold text-[#456276]">{title}</p><p className="truncate text-[10px] text-[#849aa8]">{detail}</p></div></div>;

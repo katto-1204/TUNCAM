@@ -12,9 +12,9 @@ if (Number.isNaN(port) || port <= 0) {
 
 const plugins: PluginOption[] = [react(), tailwindcss()];
 
-if (process.env.NODE_ENV !== 'production') {
-  plugins.push((await import('@replit/vite-plugin-runtime-error-modal')).default());
-  if (process.env.REPL_ID) {
+if (process.env.NODE_ENV !== 'production' && process.env.REPL_ID) {
+  try {
+    plugins.push((await import('@replit/vite-plugin-runtime-error-modal')).default());
     plugins.push(
       await import('@replit/vite-plugin-cartographer').then((module) =>
         module.cartographer({
@@ -23,6 +23,8 @@ if (process.env.NODE_ENV !== 'production') {
       ),
       await import('@replit/vite-plugin-dev-banner').then((module) => module.devBanner()),
     );
+  } catch {
+    // Replit plugins are optional outside the Replit runtime.
   }
 }
 
@@ -43,11 +45,12 @@ export default defineConfig({
   },
   server: {
     port,
-    strictPort: true,
+    strictPort: false,
     host: '0.0.0.0',
     allowedHosts: true,
     fs: {
       strict: true,
+      allow: [path.resolve(import.meta.dirname, '..', '..')],
     },
   },
   preview: {
