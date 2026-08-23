@@ -67,6 +67,18 @@ export async function removeRecord(id: string) {
   }
 }
 
+export async function clearSession() {
+  const db = await openDb();
+  try {
+    const tx = db.transaction([RECORDS_STORE, IMAGES_STORE], 'readwrite');
+    tx.objectStore(RECORDS_STORE).clear();
+    tx.objectStore(IMAGES_STORE).clear();
+    await completeTransaction(tx, () => undefined);
+  } finally {
+    db.close();
+  }
+}
+
 export async function getImage(id: string) {
   const db = await openDb();
   try {

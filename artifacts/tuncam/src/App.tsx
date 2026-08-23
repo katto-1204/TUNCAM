@@ -16,7 +16,7 @@ import {
   type Grade, type RecordItem, type SampleType, type SessionSettings, triggerDownload,
 } from '@/lib/dataset';
 import { deleteRelativeFile, ensureFolderPermission, FolderAccessError, pickSessionFolder, writeRelativeFile } from '@/lib/local-folder';
-import { getAllImages, listRecords, loadDirectoryHandle, migrateLegacyRecords, putRecord, removeRecord, saveDirectoryHandle } from '@/lib/session-store';
+import { clearSession, getAllImages, getImage, listRecords, loadDirectoryHandle, migrateLegacyRecords, putRecord, removeRecord, saveDirectoryHandle } from '@/lib/session-store';
 import { buildZip, type ZipEntry } from '@/lib/zip';
 
 const queryClient = new QueryClient();
@@ -594,6 +594,21 @@ function Tuncam() {
     await exportDataset();
   }, [records.length, notify, exportDataset]);
 
+  // Confirm End Session & clear storage for next session
+  const handleConfirmEndSession = useCallback(async () => {
+    try {
+      await clearSession();
+      Object.values(previewUrls.current).forEach((url) => URL.revokeObjectURL(url));
+      previewUrls.current = {};
+      setPreviews({});
+      setRecords([]);
+      setIsEndOpen(false);
+      notify('Session ended. Dataset exported and storage cleared for next session.', 'success');
+    } catch {
+      notify('Could not clear session data completely.', 'error');
+    }
+  }, [notify]);
+
   return (
     <div className="noise app-shell">
       <main className="dashboard-frame">
@@ -641,7 +656,7 @@ function Tuncam() {
           <aside className="soft-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4">
             <div className="mb-3 flex items-start justify-between sm:mb-4"><div><p className="eyebrow">01 / Session setup</p><h2 className="mt-1 text-[14px] font-extrabold tracking-[-.03em] text-[#203c53] sm:text-[16px]">Capture context</h2></div><div className="rounded-xl bg-[#eff8fc] p-2 text-[#2aa6d7]"><ClipboardList size={17} /></div></div>
             <div className="space-y-2.5 sm:space-y-3">
-              <label><span className="field-label">Collection site <span className="text-[#d87871]">*</span></span><select data-testid="select-collection-site" value={settings.site} onChange={(event) => { if (event.target.value === '__new') { setSettings({ ...settings, site: '' }); setCustomSite(''); } else setSettings({ ...settings, site: event.target.value }); }} className="field-control"><option>Bangkerohan, General Santos City</option><option>Fish Port, General Santos City</option><option>Navotas Fish Port, Metro Manila</option>{customSite && <option value={customSite}>{customSite}</option>}<option value="__new">Add a new site…</option></select></label>
+              <label><span className="field-label">Collection site <span className="text-[#d87871]">*</span></span><select data-testid="select-collection-site" value={settings.site} onChange={(event) => { if (event.target.value === '__new') { setSettings({ ...settings, site: '' }); setCustomSite(''); } else setSettings({ ...settings, site: event.target.value }); }} className="field-control"><option>General Santos City Fish Port Complex</option><option>Pag-Asa Bankerohan Fish Vendors Association, Inc. (Fish Bagsakan)</option>{customSite && <option value={customSite}>{customSite}</option>}<option value="__new">Add a new site…</option></select></label>
               {!settings.site && <div className="relative"><Plus className="field-icon" size={15} /><input data-testid="input-new-site" value={customSite} onChange={(event) => { setCustomSite(event.target.value); setSettings({ ...settings, site: event.target.value }); }} className="field-control with-icon" placeholder="e.g. Makar Wharf, Gensan" /></div>}
               <label><span className="field-label">Operator name <span className="text-[#d87871]">*</span></span><div className="relative"><UserRound className="field-icon" size={15} /><input data-testid="input-operator-name" value={settings.operator} onChange={(event) => setSettings({ ...settings, operator: event.target.value })} className="field-control with-icon" placeholder="Who is capturing?" autoComplete="name" /></div></label>
               <label><span className="field-label">Expert grader <span className="text-[#d87871]">*</span></span><div className="relative"><BadgeCheck className="field-icon" size={15} /><input data-testid="input-grader-name" value={settings.grader} onChange={(event) => setSettings({ ...settings, grader: event.target.value })} className="field-control with-icon" placeholder="Who is grading?" autoComplete="name" /></div></label>
@@ -773,7 +788,7 @@ function Tuncam() {
       {/* ─── MODALS ─── */}
       {isGradeOpen && <GradeModal image={capturedPreview} error={gradeError} onSelect={(grade) => void finalizeGrade(grade)} onCancel={discardCapture} />}
       {isReviewOpen && <ReviewModal records={records} previews={previews} exporting={isExporting} onClose={() => setIsReviewOpen(false)} onDelete={(id) => void deleteRecord(id)} onExport={exportManifest} onDownload={() => void exportDataset()} />}
-      {isEndOpen && <EndModal records={records} settings={settings} exporting={isExporting} onClose={() => setIsEndOpen(false)} onExport={exportManifest} onDownload={handleEndSession} />}
+      {isEndOpen && <EndModal records={records} settings={settings} exporting={isExporting} onClose={() => setIsEndOpen(false)} onConfirmEnd={handleConfirmEndSession} onExport={exportManifest} onDownload={handleEndSession} />}
       {isSettingsOpen && <ToolsModal settings={settings} onClose={() => setIsSettingsOpen(false)} onInstall={installPrompt ? installApp : undefined} />}
       {isShortcutOpen && <ShortcutModal onClose={() => setIsShortcutOpen(false)} />}
 
@@ -792,6 +807,52 @@ function Tuncam() {
 /* ═══════════════════════════════════════════════════════════════════════════
    Sub-components
    ═══════════════════════════════════════════════════════════════════════════ */
+
+function RecordThumbnail({ record, previewUrl }: { record: RecordItem; previewUrl?: string }) {
+  const [url, setUrl] = useState<string | undefined>(previewUrl);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setUrl(previewUrl);
+    setError(false);
+  }, [previewUrl]);
+
+  useEffect(() => {
+    if (!url && !error) {
+      let active = true;
+      getImage(record.id).then((blob) => {
+        if (active) {
+          if (blob && blob.size > 0) {
+            setUrl(URL.createObjectURL(blob));
+          } else {
+            setError(true);
+          }
+        }
+      }).catch(() => {
+        if (active) setError(true);
+      });
+      return () => { active = false; };
+    }
+  }, [record.id, url, error]);
+
+  if (error || !url) {
+    return (
+      <div className="flex size-full flex-col items-center justify-center bg-[#f1f5f9] p-2 text-center text-[#94a3b8]">
+        <ImageIcon size={22} className="mb-1 opacity-60" />
+        <span className="text-[8px] font-bold">No preview</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={url}
+      alt={jpegFilename(record)}
+      onError={() => setError(true)}
+      className="size-full object-cover transition duration-300 group-hover:scale-[1.03]"
+    />
+  );
+}
 
 function DownloadPanel({ exampleName, count, exporting, onDownload }: { exampleName: string; count: number; exporting: boolean; onDownload: () => void }) {
   return (
@@ -1058,13 +1119,9 @@ function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport
               <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_340px]">
                 <div>
                   <div className="overflow-hidden rounded-[16px] border border-[#ececec] bg-[#fafafa] p-2 sm:rounded-[20px] sm:p-2.5">
-                    {previews[selectedRecord.id] ? (
-                      <img src={previews[selectedRecord.id]} alt={jpegFilename(selectedRecord)} className="aspect-[4/3] w-full rounded-[12px] object-cover sm:rounded-[14px]" />
-                    ) : (
-                      <div className="flex aspect-[4/3] items-center justify-center rounded-[14px] bg-[#f1f5f9] text-[#94a3b8]">
-                        <ImageIcon size={36} />
-                      </div>
-                    )}
+                    <div className="aspect-[4/3] w-full overflow-hidden rounded-[12px] sm:rounded-[14px]">
+                      <RecordThumbnail record={selectedRecord} previewUrl={previews[selectedRecord.id]} />
+                    </div>
                   </div>
                   <div className="mt-3 rounded-[16px] border border-[#ececec] bg-white p-3 sm:mt-4 sm:rounded-[18px] sm:p-4">
                     <p className="eyebrow text-[#94a3b8]">Filename</p>
@@ -1107,45 +1164,58 @@ function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport
               </div>
             </div>
           ) : filteredRecords.length ? (
-            <div className="review-gallery p-3 sm:p-4 md:p-6">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5">
-                {filteredRecords.map((record) => (
-                  <button
-                    type="button"
-                    key={record.id}
-                    data-testid={`card-record-${record.id}`}
-                    onClick={() => setSelectedId(record.id)}
-                    className="review-gallery-card focus-ring group text-left"
-                  >
-                    <div className="relative aspect-square overflow-hidden rounded-[12px] bg-[#f1f5f9] sm:rounded-[14px]">
-                      {previews[record.id] ? (
-                        <img
-                          src={previews[record.id]}
-                          alt={`${record.sampleType}, ${gradeLabels[record.grade]}`}
-                          className="size-full object-cover transition duration-300 group-hover:scale-[1.03]"
-                        />
-                      ) : (
-                        <div className="flex size-full items-center justify-center text-[#94a3b8]">
-                          <ImageIcon size={20} />
-                        </div>
-                      )}
-                      <span
-                        className="absolute left-1.5 top-1.5 rounded-full px-1.5 py-0.5 text-[7px] font-extrabold text-white shadow-sm sm:left-2 sm:top-2 sm:px-2 sm:text-[8px]"
-                        style={{ background: gradeColors[record.grade] }}
-                      >
-                        {record.grade === 'Invalid' ? '!' : record.grade}
-                      </span>
-                      <span className="absolute bottom-1.5 right-1.5 rounded-md bg-white/90 px-1 py-0.5 font-mono text-[7px] font-bold text-[#475569] shadow-sm backdrop-blur-sm sm:bottom-2 sm:right-2 sm:px-1.5 sm:text-[8px]">
-                        #{String(record.sequence).padStart(3, '0')}
-                      </span>
+            <div className="review-gallery space-y-4 p-3 sm:space-y-5 sm:p-4 md:p-6">
+              {(['Sashibo Core', 'Tail-Cut'] as SampleType[]).map((type) => {
+                const typeRecords = filteredRecords.filter((record) => record.sampleType === type);
+                if (!typeRecords.length && gradeFilter !== 'All') return null;
+                const folderName = type === 'Sashibo Core' ? 'Sashibo-Core' : 'Tail-Cut';
+                return (
+                  <div key={type} className="rounded-[18px] border border-[#e3edf3] bg-[#f8fbfc] p-3 sm:p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="rounded-lg bg-[#e3f4fc] p-1.5 text-[#2185ae]"><FolderOpen size={16} /></div>
+                        <h3 className="text-[13px] font-extrabold text-[#203c53] sm:text-[14px]">{folderName}</h3>
+                        <span className="mono rounded-full bg-[#eef5fa] px-2 py-0.5 text-[9px] font-bold text-[#5c7a8e]">
+                          {typeRecords.length} capture{typeRecords.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
                     </div>
-                    <div className="mt-1.5 px-0.5 sm:mt-2">
-                      <p className="truncate font-mono text-[8px] font-bold text-[#334155] sm:text-[9px]">{jpegFilename(record)}</p>
-                      <p className="mt-0.5 truncate text-[7px] text-[#94a3b8] sm:text-[8px]">{record.sampleType}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
+
+                    {typeRecords.length ? (
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5">
+                        {typeRecords.map((record) => (
+                          <button
+                            type="button"
+                            key={record.id}
+                            data-testid={`card-record-${record.id}`}
+                            onClick={() => setSelectedId(record.id)}
+                            className="review-gallery-card focus-ring group text-left"
+                          >
+                            <div className="relative aspect-square overflow-hidden rounded-[12px] bg-[#f1f5f9] sm:rounded-[14px]">
+                              <RecordThumbnail record={record} previewUrl={previews[record.id]} />
+                              <span
+                                className="absolute left-1.5 top-1.5 rounded-full px-1.5 py-0.5 text-[7px] font-extrabold text-white shadow-sm sm:left-2 sm:top-2 sm:px-2 sm:text-[8px]"
+                                style={{ background: gradeColors[record.grade] }}
+                              >
+                                {record.grade === 'Invalid' ? '!' : record.grade}
+                              </span>
+                              <span className="absolute bottom-1.5 right-1.5 rounded-md bg-white/90 px-1 py-0.5 font-mono text-[7px] font-bold text-[#475569] shadow-sm backdrop-blur-sm sm:bottom-2 sm:right-2 sm:px-1.5 sm:text-[8px]">
+                                #{String(record.sequence).padStart(3, '0')}
+                              </span>
+                            </div>
+                            <div className="mt-1.5 px-0.5 sm:mt-2">
+                              <p className="truncate font-mono text-[8px] font-bold text-[#334155] sm:text-[9px]">{jpegFilename(record)}</p>
+                              <p className="mt-0.5 truncate text-[7px] text-[#94a3b8] sm:text-[8px]">{record.sampleType}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="py-2 text-[10px] text-[#94a3b8]">No {folderName} captures in this view.</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="flex min-h-[240px] flex-col items-center justify-center px-4 py-8 text-center sm:min-h-[280px] sm:px-6 sm:py-12">
@@ -1180,7 +1250,7 @@ function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport
   );
 }
 
-function EndModal({ records, settings, exporting, onClose, onExport, onDownload }: { records: RecordItem[]; settings: SessionSettings; exporting: boolean; onClose: () => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
+function EndModal({ records, settings, exporting, onClose, onConfirmEnd, onExport, onDownload }: { records: RecordItem[]; settings: SessionSettings; exporting: boolean; onClose: () => void; onConfirmEnd: () => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
   const sampleName = exampleFilename(settings.site);
   const [autoExportDone, setAutoExportDone] = useState(false);
 
@@ -1237,14 +1307,29 @@ function EndModal({ records, settings, exporting, onClose, onExport, onDownload 
               <p className="mt-0.5 text-[9px] leading-4 text-[#9e7662] sm:mt-1 sm:text-[10px]">Copy today's ZIP to a USB drive before leaving the landing center.</p>
             </div>
           </div>
-          <button type="button" data-testid="button-download-dataset-end" disabled={!records.length || exporting} onClick={onDownload} className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl bg-[#214e69] py-3 text-[11px] font-extrabold text-white disabled:opacity-40 sm:py-3.5 sm:text-[12px]">
-            <FileImage size={15} />{exporting ? 'Packing photos…' : autoExportDone ? 'Download again' : 'Download photos ZIP'}
+          <button type="button" data-testid="button-download-dataset-end" disabled={!records.length || exporting} onClick={onDownload} className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl bg-[#214e69] py-2.5 text-[10px] font-extrabold text-white disabled:opacity-40 sm:py-3 sm:text-[11px]">
+            <FileImage size={15} />{exporting ? 'Packing photos…' : autoExportDone ? 'Download photos ZIP again' : 'Download photos ZIP'}
           </button>
           <div className="flex gap-2">
-            <button type="button" data-testid="button-export-csv-end" onClick={() => onExport('csv')} className="focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#cfe1e9] bg-white py-2.5 text-[10px] font-extrabold text-[#4f7185] sm:py-3 sm:text-[11px]"><Download size={14} /> CSV</button>
-            <button type="button" data-testid="button-export-json-end" onClick={() => onExport('json')} className="focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#cfe1e9] bg-white py-2.5 text-[10px] font-extrabold text-[#4f7185] sm:py-3 sm:text-[11px]"><Download size={14} /> JSON</button>
+            <button type="button" data-testid="button-export-csv-end" onClick={() => onExport('csv')} className="focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#cfe1e9] bg-white py-2 text-[9px] font-extrabold text-[#4f7185] sm:py-2.5 sm:text-[10px]"><Download size={13} /> CSV</button>
+            <button type="button" data-testid="button-export-json-end" onClick={() => onExport('json')} className="focus-ring flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#cfe1e9] bg-white py-2 text-[9px] font-extrabold text-[#4f7185] sm:py-2.5 sm:text-[10px]"><Download size={13} /> JSON</button>
           </div>
-          <button type="button" data-testid="button-close-end" onClick={onClose} className="focus-ring w-full rounded-xl border border-[#d5e5ee] bg-white py-2.5 text-[10px] font-extrabold text-[#214e69] sm:py-3 sm:text-[11px]">Continue session</button>
+          <button
+            type="button"
+            data-testid="button-confirm-end-session"
+            onClick={onConfirmEnd}
+            className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#214e69] to-[#16384d] py-3 text-[11px] font-extrabold text-white shadow-[0_8px_20px_rgba(25,58,82,.24)] transition hover:from-[#1b4259] hover:to-[#102b3c] sm:py-3.5 sm:text-[12px]"
+          >
+            <Check size={16} /> CONFIRM END SESSION & CLEAR
+          </button>
+          <button
+            type="button"
+            data-testid="button-close-end"
+            onClick={onClose}
+            className="focus-ring w-full rounded-xl border border-[#d5e5ee] bg-white py-2.5 text-[10px] font-bold text-[#5c778a] hover:bg-[#f7fbfd] sm:py-3 sm:text-[11px]"
+          >
+            Back to session (keep capturing)
+          </button>
         </div>
       </div>
     </div>

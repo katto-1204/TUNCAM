@@ -35,7 +35,7 @@ export const gradeColors: Record<Grade, string> = {
 };
 
 export const defaultSettings: SessionSettings = {
-  site: 'Bangkerohan, General Santos City',
+  site: 'General Santos City Fish Port Complex',
   operator: '',
   grader: '',
   storage: 'Browser storage · this device',
@@ -47,9 +47,10 @@ export const defaultSettings: SessionSettings = {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const SITE_CODE_MAP: Record<string, string> = {
+  'General Santos City Fish Port Complex': 'GENS',
+  'Pag-Asa Bankerohan Fish Vendors Association, Inc. (Fish Bagsakan)': 'BNK',
   'Bangkerohan, General Santos City': 'BNK',
   'Fish Port, General Santos City': 'GENS',
-  'Navotas Fish Port, Metro Manila': 'NAV',
 };
 
 /** Get a short uppercase site code (3-4 chars) */
@@ -71,9 +72,13 @@ export function slug(value: string) {
    DATE HELPERS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/** Full date YYYY-MM-DD (for folders) */
+/** Full date YYYY-MM-DD in local time zone (for folders) */
 export function today() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /** Short date YY-MM-DD (for filenames) */
@@ -183,9 +188,8 @@ export function exportGuideText(site: string, sampleName: string, date = today()
     `Example: ${sampleName}`,
     '',
     'Site codes:',
-    '  BNK  = Bangkerohan, General Santos City',
-    '  GENS = Fish Port, General Santos City',
-    '  NAV  = Navotas Fish Port, Metro Manila',
+    '  GENS = General Santos City Fish Port Complex',
+    '  BNK  = Pag-Asa Bankerohan Fish Vendors Association, Inc. (Fish Bagsakan)',
     '',
     'Sample codes: SC = Sashibo Core, TC = Tail-Cut',
     'Grade codes:  GRD_A, GRD_B, GRD_C, GRD_INV (Invalid)',
