@@ -1,13 +1,44 @@
-export async function pickSessionFolder() {
+export async function pickSessionFolder(): Promise<FileSystemDirectoryHandle | null> {
   if (typeof window.showDirectoryPicker !== 'function') return null;
-  return window.showDirectoryPicker({ id: 'tuncam-session', mode: 'readwrite', startIn: 'documents' });
+
+  // First attempt: try with relaxed options (no startIn to avoid "system files" error)
+  try {
+    return await window.showDirectoryPicker({ mode: 'readwrite' });
+  } catch (error) {
+    // If user cancelled, propagate AbortError so caller can show "cancelled" message
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+
+    // Second attempt: completely bare call as last fallback
+    try {
+      return await window.showDirectoryPicker({ mode: 'readwrite' } as DirectoryPickerOptions);
+    } catch (retryError) {
+      if (retryError instanceof DOMException && retryError.name === 'AbortError') throw retryError;
+      throw new FolderAccessError(
+        'Could not open the selected folder. Try choosing a different folder that is not a system directory.',
+        retryError,
+      );
+    }
+  }
+}
+
+export class FolderAccessError extends Error {
+  cause: unknown;
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = 'FolderAccessError';
+    this.cause = cause;
+  }
 }
 
 export async function ensureFolderPermission(handle: FileSystemDirectoryHandle) {
-  const current = await handle.queryPermission({ mode: 'readwrite' });
-  if (current === 'granted') return true;
-  const next = await handle.requestPermission({ mode: 'readwrite' });
-  return next === 'granted';
+  try {
+    const current = await handle.queryPermission({ mode: 'readwrite' });
+    if (current === 'granted') return true;
+    const next = await handle.requestPermission({ mode: 'readwrite' });
+    return next === 'granted';
+  } catch {
+    return false;
+  }
 }
 
 export async function writeRelativeFile(root: FileSystemDirectoryHandle, relativePath: string, data: Blob | string) {
