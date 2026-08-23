@@ -331,7 +331,10 @@ function Tuncam() {
     await writeRelativeFile(handle, recordPath(record), image);
   }, [notify]);
 
+  const [isSavingGrade, setIsSavingGrade] = useState(false);
+
   const finalizeGrade = useCallback(async (grade: Grade) => {
+    if (isSavingGrade) return;
     if (!settings.sampleType) {
       setGradeError('No sample type selected. Go back and pick Sashibo Core or Tail-Cut.');
       return;
@@ -340,6 +343,7 @@ function Tuncam() {
       setGradeError('Capture failed — the image was not saved in memory. Press Discard and try capturing again.');
       return;
     }
+    setIsSavingGrade(true);
     const date = today();
     const sequence = currentSequence;
     const record: RecordItem = {
@@ -355,6 +359,7 @@ function Tuncam() {
     try {
       await putRecord(record, capturedBlob);
     } catch (err) {
+      setIsSavingGrade(false);
       const isQuotaError = err instanceof DOMException && (err.name === 'QuotaExceededError' || err.message.includes('quota'));
       if (isQuotaError) {
         setGradeError('Storage is full. Download the ZIP to free up space, then try again.');
@@ -375,9 +380,10 @@ function Tuncam() {
     setCapturedPreview(undefined);
     setIsGradeOpen(false);
     setIsCapturing(false);
+    setIsSavingGrade(false);
     setGradeError('');
     notify(`${jpegFilename(record)} saved.`, 'success');
-  }, [capturedBlob, capturedPreview, currentSequence, rememberPreview, settings.sampleType, settings.site, writeToFolder, notify]);
+  }, [capturedBlob, capturedPreview, currentSequence, isSavingGrade, rememberPreview, settings.sampleType, settings.site, writeToFolder, notify]);
 
   useEffect(() => {
     const handleKeys = (event: KeyboardEvent) => {
@@ -1035,6 +1041,17 @@ function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport
 
   const selectedRecord = selectedId ? records.find((record) => record.id === selectedId) : undefined;
   const inDetail = Boolean(selectedRecord);
+
+  useEffect(() => {
+    const handleModalKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && inDetail) {
+        event.stopPropagation();
+        setSelectedId('');
+      }
+    };
+    window.addEventListener('keydown', handleModalKey, { capture: true });
+    return () => window.removeEventListener('keydown', handleModalKey, { capture: true });
+  }, [inDetail]);
 
   const handleDelete = (id: string) => {
     onDelete(id);

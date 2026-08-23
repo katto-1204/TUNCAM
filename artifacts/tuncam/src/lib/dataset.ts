@@ -65,7 +65,7 @@ export function siteCode(site: string): string {
 
 /** Full slug for folder names (keeps the long version for folder paths) */
 export function slug(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 34) || 'site';
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 34).replace(/^-|-$/g, '') || 'site';
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -151,7 +151,7 @@ export function photoZipPath(record: RecordItem) {
 }
 
 export function exampleFilename(site: string, date = today()) {
-  return buildFilename(site || 'Bangkerohan, General Santos City', 'Sashibo Core', 'A', 1, date);
+  return buildFilename(site || 'General Santos City Fish Port Complex', 'Sashibo Core', 'A', 1, date);
 }
 
 export function exampleFolder(site: string, date = today()) {
@@ -231,7 +231,7 @@ export function manifestCsv(records: RecordItem[], settings: SessionSettings) {
   const header = 'filename,date,site,site_code,sample_type,sample_code,grade,grade_code,sequence,operator,grader,folder,created_at';
   const body = rows.map((row) =>
     [row.filename, row.date, row.site, row.site_code, row.sample_type, row.sample_code, row.grade, row.grade_code, row.sequence, row.operator, row.grader, row.folder, row.created_at]
-      .map((value) => `"${String(value).replaceAll('"', '""')}"`)
+      .map((value) => `"${String(value).replaceAll('\r', '').replaceAll('\n', ' ').replaceAll('"', '""')}"`)
       .join(','),
   );
   return [header, ...body].join('\n');
