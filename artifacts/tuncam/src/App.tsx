@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   AlertTriangle, Aperture, Archive, BadgeCheck, Camera, Check, ChevronDown, ChevronLeft, CircleAlert,
   ClipboardList, CloudOff, Download, FileImage, FileUp, FolderOpen, Gauge, HardDrive,
-  Image as ImageIcon, Info, Keyboard, MonitorDown, Pause, Plus, RefreshCw,
+  Image as ImageIcon, Info, Keyboard, LaptopMinimal, Loader2, MonitorDown, Pause, PenLine, Plus, RefreshCw, RotateCcw,
   ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2,
   Undo2, Upload, UserRound, Video, X, Zap,
 } from 'lucide-react';
@@ -65,6 +65,8 @@ function Tuncam() {
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isOverriding, setIsOverriding] = useState(false);
+  const [importDragOver, setImportDragOver] = useState(false);
+  const [lastImport, setLastImport] = useState<{ name: string; added: number; duplicates: number; missingImages: number } | null>(null);
   const [isAwake, setIsAwake] = useState(false);
   const [wakeSupport, setWakeSupport] = useState<'unknown' | 'supported' | 'unsupported'>('unknown');
   const [storageStatus, setStorageStatus] = useState<{ used?: number; quota?: number; low: boolean }>({ low: false });
@@ -547,10 +549,8 @@ function Tuncam() {
     }
   };
 
-  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file || isImporting) return;
+  const handleImportFile = async (file: File) => {
+    if (isImporting) return;
     setIsImporting(true);
     notify(`Reading "${file.name}"…`, 'info');
     try {
@@ -581,6 +581,7 @@ function Tuncam() {
         if (result.missingImages) parts.push(`${result.missingImages} entr${result.missingImages === 1 ? 'y had no' : 'ies had no'} image`);
         notify(`${parts.join(' · ')}.`, 'success');
       }
+      setLastImport({ name: file.name, added: result.added.length, duplicates: result.duplicates, missingImages: result.missingImages });
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Import failed — that ZIP could not be read.', 'error');
     } finally {
@@ -689,6 +690,8 @@ function Tuncam() {
 
   return (
     <div className="noise app-shell">
+      <div aria-hidden className="ambient-orb" style={{ width: 460, height: 460, top: -180, right: -140, background: 'radial-gradient(circle, rgba(124,150,255,.4), transparent 70%)' }} />
+      <div aria-hidden className="ambient-orb" style={{ width: 400, height: 400, bottom: -160, left: -150, background: 'radial-gradient(circle, rgba(72,196,235,.32), transparent 70%)' }} />
       <main className="dashboard-frame">
         {/* ─── HEADER ─── */}
         <header className="glass-card flex min-h-[56px] items-center justify-between gap-3 rounded-[18px] px-3 py-2.5 sm:min-h-[68px] sm:rounded-[22px] sm:px-4 sm:py-3 md:px-6">
@@ -762,7 +765,8 @@ function Tuncam() {
                 <p className="eyebrow">02 / Live view</p>
                 <div className="mt-1 flex items-center gap-2">
                   <h2 className="text-[14px] font-extrabold tracking-[-.03em] text-[#203c53] sm:text-[16px]">Imaging chamber</h2>
-                  <span className={`rounded-full px-2 py-1 text-[8px] font-extrabold uppercase tracking-[.08em] sm:text-[9px] ${cameraState === 'ready' ? 'bg-[#e5f8f2] text-[#238866]' : cameraState === 'idle' ? 'bg-[#edf1ff] text-[#3658c4]' : cameraState === 'loading' ? 'bg-[#fff8e8] text-[#bc8d49]' : 'bg-[#fff3e8] text-[#bc7449]'}`}>
+                  <span className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-[8px] font-extrabold uppercase tracking-[.08em] sm:text-[9px] ${cameraState === 'ready' ? 'bg-[#e5f8f2] text-[#238866]' : cameraState === 'idle' ? 'bg-[#edf1ff] text-[#3658c4]' : cameraState === 'loading' ? 'bg-[#fff8e8] text-[#bc8d49]' : 'bg-[#fff3e8] text-[#bc7449]'}`}>
+                    {cameraState === 'ready' && <span className="live-dot size-1.5 rounded-full bg-[#29b685]" />}
                     {cameraState === 'ready' ? 'Live feed' : cameraState === 'loading' ? 'Connecting…' : cameraState === 'idle' ? 'Not connected' : cameraState === 'denied' ? 'Permission needed' : cameraState === 'timeout' ? 'Timed out' : 'No camera'}
                   </span>
                 </div>
@@ -785,6 +789,7 @@ function Tuncam() {
                   <div className="pointer-events-none absolute inset-x-[10%] top-1/2 h-px bg-white/35 sm:inset-x-[16%]" />
                   <div className="pointer-events-none absolute inset-y-[12%] left-1/2 w-px bg-white/35 sm:inset-y-[17%]" />
                   <div className="absolute left-2 top-2 flex items-center gap-2 rounded-full bg-[#193b4d]/60 px-2 py-1 text-[8px] font-bold text-white backdrop-blur sm:left-4 sm:top-4 sm:px-2.5 sm:py-1.5 sm:text-[9px]">ALIGN SAMPLE WITHIN GUIDE</div>
+                  <div className="absolute right-2 top-2 flex items-center gap-1.5 rounded-full bg-[#193b4d]/60 px-2 py-1 text-[8px] font-extrabold uppercase tracking-[.14em] text-white backdrop-blur sm:right-4 sm:top-4 sm:px-2.5 sm:py-1.5 sm:text-[9px]"><span className="live-dot size-1.5 rounded-full bg-[#4ade80]" />Live</div>
                   <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-[#193b4d]/60 px-2.5 py-1 text-[9px] font-medium text-white/90 backdrop-blur sm:bottom-3 sm:px-3 sm:py-1.5 sm:text-[10px]">Manual shutter only · no auto-detect</div>
                 </>
               )}
@@ -794,7 +799,7 @@ function Tuncam() {
             <div className="mt-2 hidden grid-cols-[1fr_auto_1fr] items-center gap-3 sm:mt-3 md:grid">
               <div className="flex items-center gap-2"><div className="rounded-lg bg-[#eaf5fa] p-2 text-[#3b9fca]"><ScanLine size={15} /></div><div><p className="text-[10px] font-bold text-[#4b687d]">Framing guide only</p><p className="text-[9px] text-[#8ca1af]">Capture happens when you press the button</p></div></div>
               <button type="button" data-testid="button-capture" disabled={!readyToCapture} onClick={captureFrame} className={`capture-button focus-ring group relative flex h-[56px] min-w-[170px] items-center justify-center gap-3 rounded-[18px] px-4 text-white transition hover:-translate-y-0.5 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 lg:h-[64px] lg:min-w-[190px] lg:rounded-[20px] lg:px-5 ${readyToCapture ? 'blue-sheen' : 'bg-[#afc6d2]'}`}><span className="flex size-8 items-center justify-center rounded-xl border border-white/30 bg-white/15 lg:size-9"><Camera size={18} /></span><span className="text-left"><span className="block text-[11px] font-extrabold lg:text-[12px]">Capture sample</span><span className="mono block text-[8px] opacity-80 lg:text-[9px]">SPACEBAR</span></span></button>
-              <div className="flex justify-end"><button type="button" data-testid="button-undo-last" disabled={!records.length} onClick={() => void undoLast()} className="focus-ring flex items-center gap-2 rounded-xl border border-[#d8e7ee] bg-white/70 px-3 py-2.5 text-[10px] font-bold text-[#617b8d] hover:bg-white disabled:opacity-40"><Undo2 size={14} /> Undo last</button></div>
+              <div className="flex justify-end"><button type="button" data-testid="button-undo-last" disabled={!records.length} onClick={() => void undoLast()} className="action-btn focus-ring px-3 py-2.5 text-[10px]"><Undo2 size={14} /> Undo last</button></div>
             </div>
             {!readyToCapture && <p className="mt-2 text-center text-[9px] text-[#8aa0ae] sm:text-[10px]">Press Connect camera, fill the required fields, pick a sample type, then capture manually.</p>}
           </section>
@@ -804,7 +809,7 @@ function Tuncam() {
             {/* Tally */}
             <div className="soft-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4">
               <div className="flex items-start justify-between"><div><p className="eyebrow">03 / Session pulse</p><h2 className="mt-1 text-[14px] font-extrabold tracking-[-.03em] text-[#203c53] sm:text-[16px]">Today's tally</h2></div><div className="blue-sheen rounded-xl p-2 text-white"><Gauge size={17} /></div></div>
-              <div className="mt-3 grid grid-cols-4 gap-1.5 sm:mt-4">{grades.map((grade) => <div key={grade} className="rounded-xl bg-[#f5f9fb] px-2 py-2 text-center sm:py-2.5"><div className="mx-auto mb-1 flex size-5 items-center justify-center rounded-lg text-[10px] font-extrabold text-white sm:size-6 sm:text-[11px]" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</div><p data-testid={`text-count-${grade.toLowerCase()}`} className="mono text-[16px] font-medium text-[#24435a] sm:text-[18px]">{counts[grade]}</p><p className="mt-0.5 text-[7px] font-bold uppercase tracking-[.06em] text-[#91a6b3] sm:text-[8px]">{grade === 'Invalid' ? 'bad' : 'grade'}</p></div>)}</div>
+              <div className="mt-3 grid grid-cols-4 gap-1.5 sm:mt-4">{grades.map((grade) => <div key={grade} className="rounded-xl px-2 py-2 text-center transition-shadow sm:py-2.5" style={{ background: `${gradeColors[grade]}0f`, boxShadow: `inset 0 0 0 1px ${gradeColors[grade]}26` }}><div className="mx-auto mb-1 flex size-5 items-center justify-center rounded-lg text-[10px] font-extrabold text-white shadow-sm sm:size-6 sm:text-[11px]" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</div><p data-testid={`text-count-${grade.toLowerCase()}`} className={`mono text-[16px] font-medium sm:text-[18px] ${counts[grade] ? '' : 'text-[#b7c7d2]'}`} style={counts[grade] ? { color: gradeColors[grade] } : undefined}>{counts[grade]}</p><p className="mt-0.5 text-[7px] font-bold uppercase tracking-[.06em] text-[#91a6b3] sm:text-[8px]">{grade === 'Invalid' ? 'bad' : 'grade'}</p></div>)}</div>
               <div className="mt-2 flex items-center justify-between border-t border-[#e6eef3] pt-2 sm:mt-3 sm:pt-3"><span className="text-[10px] font-bold text-[#577286] sm:text-[11px]">Total captured</span><span data-testid="text-total-captured" className="mono text-[16px] font-medium text-[#1c75ac] sm:text-[18px]">{records.length.toString().padStart(3, '0')}</span></div>
               {latestRecord && <div className="mt-2 rounded-2xl border border-[#d7e8f3] bg-white/70 p-2.5 sm:mt-3 sm:p-3"><p className="eyebrow">Last capture</p><p className="mt-1 truncate font-mono text-[10px] font-extrabold text-[#36576c] sm:text-[11px]">{jpegFilename(latestRecord)}</p><p className="mt-1 text-[9px] text-[#7f95a5] sm:text-[10px]">{latestRecord.sampleType} · {gradeLabels[latestRecord.grade]}</p></div>}
             </div>
@@ -813,23 +818,24 @@ function Tuncam() {
             <div className="soft-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4"><div className="flex items-center justify-between"><div><p className="eyebrow">Progress / target 800</p><p className="mt-1 text-[11px] font-bold text-[#426278] sm:text-[12px]">Class balance</p></div><SlidersHorizontal size={16} className="text-[#78a1b7]" /></div><div className="mt-2 space-y-2 sm:mt-3 sm:space-y-3">{(['Sashibo Core', 'Tail-Cut'] as SampleType[]).map((type) => <div key={type}><div className="mb-1 flex items-center justify-between text-[9px] sm:mb-1.5 sm:text-[10px]"><span className="font-bold text-[#5c7587]">{type}</span><span className="mono text-[#849aa8]">{typeCounts[type]} / 3,200</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#e5eff4] sm:h-2"><div className="h-full rounded-full bg-gradient-to-r from-[#39b9e7] to-[#4a78df] transition-all duration-500" style={{ width: `${Math.min(100, typeCounts[type] / 32)}%` }} /></div></div>)}</div></div>
 
             {/* Storage */}
-            <div className="soft-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><HardDrive size={16} className={storageStatus.low ? 'text-[#d8796e]' : 'text-[#3c9cbb]'} /><span className="text-[10px] font-extrabold text-[#466479] sm:text-[11px]">Local storage</span></div><span className={`rounded-full px-2 py-1 text-[8px] font-bold sm:text-[9px] ${storageStatus.low ? 'bg-[#fff0ed] text-[#bd685f]' : 'bg-[#ebf8f4] text-[#2e8c70]'}`}>{storageStatus.low ? 'Review soon' : 'Healthy'}</span></div><p className="mt-1.5 text-[9px] leading-4 text-[#8499a8] sm:mt-2 sm:text-[10px]">{storageStatus.quota ? `${formatBytes(storageStatus.used || 0)} used of ${formatBytes(storageStatus.quota)} browser quota.` : 'Browser storage estimate will appear when supported.'}</p>{storageStatus.low && <div className="mt-2 flex gap-2 rounded-lg bg-[#fff5f1] p-2 text-[9px] text-[#ae6259] sm:text-[10px]"><CircleAlert size={14} className="shrink-0" /> Download the photos ZIP and copy it to a backup drive.</div>}</div>
+            <div className="soft-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><HardDrive size={16} className={storageStatus.low ? 'text-[#d8796e]' : 'text-[#3c9cbb]'} /><span className="text-[10px] font-extrabold text-[#466479] sm:text-[11px]">Local storage</span></div><span className={`rounded-full px-2 py-1 text-[8px] font-bold sm:text-[9px] ${storageStatus.low ? 'bg-[#fff0ed] text-[#bd685f]' : 'bg-[#ebf8f4] text-[#2e8c70]'}`}>{storageStatus.low ? 'Review soon' : 'Healthy'}</span></div><p className="mt-1.5 text-[9px] leading-4 text-[#8499a8] sm:mt-2 sm:text-[10px]">{storageStatus.quota ? `${formatBytes(storageStatus.used || 0)} used of ${formatBytes(storageStatus.quota)} browser quota.` : 'Browser storage estimate will appear when supported.'}</p>{storageStatus.quota ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#e5eff4]" data-testid="bar-storage-usage"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, ((storageStatus.used || 0) / storageStatus.quota) * 100)}%`, background: storageStatus.low ? 'linear-gradient(90deg,#f0a28e,#d8776f)' : 'linear-gradient(90deg,#39b9e7,#4a78df)' }} /></div> : null}{storageStatus.low && <div className="mt-2 flex gap-2 rounded-lg bg-[#fff5f1] p-2 text-[9px] text-[#ae6259] sm:text-[10px]"><CircleAlert size={14} className="shrink-0" /> Download the photos ZIP and copy it to a backup drive.</div>}</div>
 
-            {/* Action buttons */}
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" data-testid="button-open-review" onClick={() => setIsReviewOpen(true)} className="focus-ring flex items-center justify-center gap-1.5 rounded-xl border border-[#d5e5ed] bg-white/80 py-2.5 text-[9px] font-extrabold text-[#4c6b7f] hover:bg-white sm:gap-2 sm:py-3 sm:text-[10px]"><ImageIcon size={14} /> Review <span className="rounded-full bg-[#eaf4f8] px-1.5 py-0.5 text-[8px] text-[#4182a1] sm:text-[9px]">{records.length}</span></button>
-              <button type="button" data-testid="button-end-session" onClick={() => setIsEndOpen(true)} className="focus-ring flex items-center justify-center gap-1.5 rounded-xl border border-[#e2dfe8] bg-white/80 py-2.5 text-[9px] font-extrabold text-[#766587] hover:bg-white sm:gap-2 sm:py-3 sm:text-[10px]"><Archive size={14} /> End session</button>
-              <button type="button" data-testid="button-import-data" disabled={isImporting} onClick={() => importInputRef.current?.click()} className="focus-ring col-span-2 flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#b9d8e6] bg-[#f4fafd] py-2 text-[9px] font-extrabold text-[#257d9f] hover:bg-[#e9f6fb] disabled:opacity-50 sm:gap-2 sm:py-2.5 sm:text-[10px]"><FileUp size={14} />{isImporting ? 'Importing session…' : 'Import session ZIP from another laptop'}</button>
-            </div>
-            <input ref={importInputRef} type="file" accept=".zip,application/zip,application/x-zip-compressed" className="hidden" onChange={(event) => void handleImportFile(event)} data-testid="input-import-zip" />
-
-            {/* Download panel */}
-            <DownloadPanel
+            {/* Wrap-up: download, review, import, end session */}
+            <ActionsPanel
               exampleName={exampleFilename(settings.site)}
               count={records.length}
               exporting={isExporting}
+              importing={isImporting}
+              dragOver={importDragOver}
+              lastImport={lastImport}
               onDownload={() => void exportDataset()}
+              onReview={() => setIsReviewOpen(true)}
+              onEnd={() => setIsEndOpen(true)}
+              onImportClick={() => importInputRef.current?.click()}
+              onDragStateChange={setImportDragOver}
+              onDropFile={(file) => void handleImportFile(file)}
             />
+            <input ref={importInputRef} type="file" accept=".zip,application/zip,application/x-zip-compressed" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void handleImportFile(file); }} data-testid="input-import-zip" />
           </aside>
         </section>
 
@@ -935,18 +941,41 @@ function RecordThumbnail({ record, previewUrl }: { record: RecordItem; previewUr
   );
 }
 
-function DownloadPanel({ exampleName, count, exporting, onDownload }: { exampleName: string; count: number; exporting: boolean; onDownload: () => void }) {
+function ActionsPanel({ exampleName, count, exporting, importing, dragOver, lastImport, onDownload, onReview, onEnd, onImportClick, onDragStateChange, onDropFile }: {
+  exampleName: string;
+  count: number;
+  exporting: boolean;
+  importing: boolean;
+  dragOver: boolean;
+  lastImport: { name: string; added: number; duplicates: number; missingImages: number } | null;
+  onDownload: () => void;
+  onReview: () => void;
+  onEnd: () => void;
+  onImportClick: () => void;
+  onDragStateChange: (active: boolean) => void;
+  onDropFile: (file: File) => void;
+}) {
   return (
-    <div className="export-card soft-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4">
+    <div
+      data-testid="panel-import"
+      onDragOver={(event) => { event.preventDefault(); if (!dragOver) onDragStateChange(true); }}
+      onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) onDragStateChange(false); }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDragStateChange(false);
+        const file = event.dataTransfer.files?.[0];
+        if (file) onDropFile(file);
+      }}
+      className={`soft-card export-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4 ${dragOver ? 'import-dropzone-active' : 'import-dropzone'}`}
+    >
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="eyebrow">04 / Download</p>
-          <h2 className="mt-1 text-[14px] font-extrabold tracking-[-.03em] text-[#203c53] sm:text-[16px]">Photos ZIP</h2>
+          <p className="eyebrow">04 / Wrap-up</p>
+          <h2 className="mt-1 text-[14px] font-extrabold tracking-[-.03em] text-[#203c53] sm:text-[16px]">Export &amp; merge</h2>
         </div>
-        <div className="rounded-xl bg-[#eaf6fb] p-2 text-[#2aa6d7]"><FileImage size={17} /></div>
+        <div className={`rounded-xl p-2 transition ${dragOver ? 'blue-sheen text-white' : 'bg-[#eaf6fb] text-[#2aa6d7]'}`}><FileImage size={17} /></div>
       </div>
-      <p className="mt-1.5 text-[9px] leading-4 text-[#7d94a4] sm:mt-2 sm:text-[10px]">Extract the ZIP into tuncam / date-place / Tail-Cut or Sashibo-Core / GradeA–Invalid. Example file:</p>
-      <FilenamePreview name={exampleName} />
+      {count > 0 && <FilenamePreview name={exampleName} />}
       <button
         type="button"
         data-testid="button-download-dataset"
@@ -956,6 +985,36 @@ function DownloadPanel({ exampleName, count, exporting, onDownload }: { exampleN
       >
         <Download size={14} />{exporting ? 'Packing photos…' : `Download ${count || 0} photo${count === 1 ? '' : 's'} ZIP`}
       </button>
+
+      <div className="mt-2 grid grid-cols-3 gap-1.5 sm:gap-2">
+        <button type="button" data-testid="button-open-review" onClick={onReview} className="action-btn focus-ring text-[9px] sm:text-[10px]">
+          <ImageIcon size={13} /> Review
+          <span className="rounded-full bg-[#eaf4f8] px-1.5 py-0.5 mono text-[8px] font-bold text-[#4182a1]">{count}</span>
+        </button>
+        <button type="button" data-testid="button-import-data" disabled={importing} onClick={onImportClick} className="action-btn action-btn-accent focus-ring text-[9px] sm:text-[10px]" title={importing ? 'Reading session ZIP…' : 'Merge a TUNCAM ZIP exported on another laptop'}>
+          {importing ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} />}
+          {importing ? 'Merging…' : 'Import'}
+        </button>
+        <button type="button" data-testid="button-end-session" onClick={onEnd} className="action-btn action-btn-violet focus-ring text-[9px] sm:text-[10px]">
+          <Archive size={13} /> End
+        </button>
+      </div>
+
+      <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-[8px] leading-3.5 text-[#93a9b7] sm:text-[9px]">
+        <LaptopMinimal size={11} className="shrink-0" />
+        {importing ? 'Merging photos from that session…' : dragOver ? 'Release to merge this session into today\u2019s tally.' : 'Drop a TUNCAM ZIP from another laptop here to merge it — duplicates skip automatically.'}
+      </p>
+
+      {lastImport && (
+        <div data-testid="summary-import" className="fade-up mt-2 rounded-xl border border-[#e3edf3] bg-[#f8fbfc] px-2.5 py-2">
+          <p className="mono truncate text-[8px] font-bold text-[#5b7a8e] sm:text-[9px]" title={lastImport.name}>{lastImport.name}</p>
+          <div className="mt-1.5 flex flex-wrap gap-1 sm:gap-1.5">
+            <span className="rounded-full bg-[#ebf8f4] px-2 py-0.5 text-[7px] font-extrabold uppercase tracking-[.06em] text-[#25886e] sm:text-[8px]">+{lastImport.added} imported</span>
+            {lastImport.duplicates > 0 && <span className="rounded-full bg-[#fff7ec] px-2 py-0.5 text-[7px] font-extrabold uppercase tracking-[.06em] text-[#b98a49] sm:text-[8px]">{lastImport.duplicates} duplicate{lastImport.duplicates === 1 ? '' : 's'} skipped</span>}
+            {lastImport.missingImages > 0 && <span className="rounded-full bg-[#fff1f0] px-2 py-0.5 text-[7px] font-extrabold uppercase tracking-[.06em] text-[#bd685f] sm:text-[8px]">{lastImport.missingImages} no image</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1038,23 +1097,30 @@ function CameraEmpty({ state, issue, onRetry }: { state: CameraState; issue?: st
 
 function GradeModal({ image, error, onSelect, onCancel }: { image?: string; error?: string; onSelect: (grade: Grade) => void; onCancel: () => void }) {
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-[#18354a]/45 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="modal-in flex max-h-[95dvh] w-full flex-col overflow-hidden rounded-t-[24px] border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.28)] sm:max-w-[620px] sm:rounded-[24px]">
-        <div className="flex items-start justify-between border-b border-[#e4edf2] px-4 py-3 sm:px-5 sm:py-4 md:px-6">
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-[#18354a]/50 p-0 backdrop-blur-md sm:items-center sm:p-4">
+      <div className="modal-in flex max-h-[95dvh] w-full flex-col overflow-hidden rounded-t-[24px] border border-white/80 bg-[#f9fcfd] shadow-[0_30px_90px_rgba(20,58,86,.32)] sm:max-w-[640px] sm:rounded-[24px]">
+        <div className="relative flex items-start justify-between border-b border-[#e4edf2] bg-gradient-to-r from-white/90 to-[#f2f9fc] px-4 py-3 sm:px-5 sm:py-4 md:px-6">
           <div>
             <p className="eyebrow text-[#288bab]">Capture held · label required</p>
             <h2 className="mt-1 text-[17px] font-extrabold tracking-[-.04em] text-[#1f3c52] sm:text-[20px]">How would you grade this sample?</h2>
             <p className="mt-1 text-[10px] text-[#77909e] sm:text-[11px]">Choose one label to save the image and continue.</p>
           </div>
-          <div className="hidden rounded-xl bg-[#eaf7fb] p-2 text-[#299ac4] sm:block"><ClipboardList size={18} /></div>
+          <div className="hidden rounded-xl border border-[#d9edf5] bg-white p-2 text-[#299ac4] shadow-sm sm:block"><ClipboardList size={18} /></div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="grid gap-3 p-4 sm:grid-cols-[160px_1fr] sm:gap-4 sm:p-5 md:p-6">
-            {image
-              ? <img src={image} alt="Captured tuna sample awaiting grade" className="aspect-square w-full rounded-[15px] border border-[#dbe8ee] object-cover" />
-              : <div className="flex aspect-square items-center justify-center rounded-[15px] bg-[#eaf1f5] text-[#7a98aa]"><ImageIcon /></div>
-            }
+          <div className="grid gap-3.5 p-4 sm:grid-cols-[170px_1fr] sm:gap-4 sm:p-5 md:p-6">
+            <div className={`pop-in relative ${image ? 'overflow-hidden rounded-[18px] border-4 border-white shadow-[0_16px_38px_rgba(20,58,86,.22)]' : ''}`}>
+              {image
+                ? <>
+                    <img src={image} alt="Captured tuna sample awaiting grade" className="aspect-square w-full object-cover" />
+                    <span className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-full bg-[#193b4d]/70 px-2 py-1 text-[7px] font-extrabold uppercase tracking-[.12em] text-white backdrop-blur-sm">
+                      <span className="live-dot size-1.5 rounded-full bg-[#62dded]" /> Awaiting grade
+                    </span>
+                  </>
+                : <div className="flex aspect-square items-center justify-center rounded-[15px] bg-[#eaf1f5] text-[#7a98aa]"><ImageIcon /></div>
+              }
+            </div>
             <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
               {grades.map((grade, index) => (
                 <button
@@ -1062,13 +1128,13 @@ function GradeModal({ image, error, onSelect, onCancel }: { image?: string; erro
                   key={grade}
                   data-testid={`button-grade-${grade.toLowerCase()}`}
                   onClick={() => onSelect(grade)}
-                  className="focus-ring group flex min-h-[72px] flex-col items-start justify-between rounded-[15px] border border-[#d8e6ed] bg-white p-2.5 text-left shadow-[0_4px_12px_rgba(38,83,109,.04)] transition hover:-translate-y-0.5 hover:border-[#7dc8e1] hover:shadow-[0_9px_20px_rgba(38,83,109,.11)] sm:min-h-[86px] sm:p-3"
+                  className="focus-ring flex min-h-[60px] items-center justify-between gap-3 rounded-[14px] border border-[#e2e8f0] bg-white px-3 py-2.5 text-left transition-colors hover:border-[#9fc6d8] hover:bg-[#f7fbfd] sm:min-h-[68px] sm:px-4"
                 >
-                  <div className="flex w-full items-center justify-between">
-                    <span className="flex size-7 items-center justify-center rounded-xl text-[12px] font-extrabold text-white sm:size-8 sm:text-[13px]" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</span>
-                    <span className="mono text-[9px] text-[#a0b1bb] sm:text-[10px]">{index + 1}</span>
-                  </div>
-                  <span className="text-[10px] font-extrabold text-[#486579] sm:text-[11px]">{gradeLabels[grade]}</span>
+                  <span className="flex items-center gap-2.5">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg text-[12px] font-extrabold text-white sm:size-8" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</span>
+                    <span className="text-[11px] font-bold text-[#334155] sm:text-[12px]">{gradeLabels[grade]}</span>
+                  </span>
+                  <span className="mono rounded-md bg-[#f1f5f9] px-1.5 py-0.5 text-[9px] font-medium text-[#94a3b8]">{index + 1}</span>
                 </button>
               ))}
             </div>
@@ -1083,10 +1149,10 @@ function GradeModal({ image, error, onSelect, onCancel }: { image?: string; erro
           )}
         </div>
 
-        <div className="flex items-center justify-between bg-[#f0f6f9] px-4 py-2.5 text-[9px] text-[#78909e] sm:px-5 sm:py-3 sm:text-[10px] md:px-6">
+        <div className="flex items-center justify-between border-t border-[#e4edf2] bg-gradient-to-r from-[#f0f6f9] to-[#f7fafc] px-4 py-2.5 text-[9px] text-[#78909e] sm:px-5 sm:py-3 sm:text-[10px] md:px-6">
           <span className="hidden items-center gap-2 sm:flex"><Zap size={13} className="text-[#2aa4ce]" /> Keyboard ready: 1 / 2 / 3 / 4</span>
           <span className="text-[9px] sm:hidden">Tap a grade to save</span>
-          <button type="button" data-testid="button-cancel-capture" onClick={onCancel} className="focus-ring font-bold text-[#6d8493] hover:text-[#287a9f]">Discard frame</button>
+          <button type="button" data-testid="button-cancel-capture" onClick={onCancel} className="focus-ring rounded-lg px-2 py-1 font-bold text-[#6d8493] transition hover:bg-white hover:text-[#c75a50]">Discard frame</button>
         </div>
       </div>
     </div>
@@ -1096,6 +1162,7 @@ function GradeModal({ image, error, onSelect, onCancel }: { image?: string; erro
 function ReviewModal({ records, previews, exporting, overriding, onClose, onDelete, onOverrideGrade, onExport, onDownload }: { records: RecordItem[]; previews: Record<string, string>; exporting: boolean; overriding: boolean; onClose: () => void; onDelete: (id: string) => void; onOverrideGrade: (id: string, grade: Grade) => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
   const [selectedId, setSelectedId] = useState('');
   const [gradeFilter, setGradeFilter] = useState<Grade | 'All'>('All');
+  const [pendingGrade, setPendingGrade] = useState<Grade | ''>('');
 
   const gradeCounts = useMemo(() => {
     const counts: Record<Grade | 'All', number> = { All: records.length, A: 0, B: 0, C: 0, Invalid: 0 };
@@ -1116,6 +1183,10 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
 
   const selectedRecord = selectedId ? records.find((record) => record.id === selectedId) : undefined;
   const inDetail = Boolean(selectedRecord);
+
+  useEffect(() => {
+    setPendingGrade('');
+  }, [selectedRecord?.id]);
 
   useEffect(() => {
     const handleModalKey = (event: KeyboardEvent) => {
@@ -1225,36 +1296,87 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
                 </div>
 
                 <div className="space-y-3">
-                  <div className="rounded-[16px] border border-[#ececec] bg-white p-3 sm:rounded-[18px] sm:p-4">
-                    <p className="eyebrow text-[#94a3b8]">Manual grade override</p>
-                    <p className="mt-1 text-[9px] leading-4 text-[#94a3b8] sm:text-[10px]">Review the photo, then override the expert grade. The filename, tally and folders update automatically.</p>
-                    <div className="mt-2 grid grid-cols-4 gap-1.5 sm:mt-2.5 sm:gap-2">
-                      {grades.map((grade) => {
-                        const active = selectedRecord.grade === grade;
-                        return (
+                  <div className="overflow-hidden rounded-[16px] border border-[#e3edf3] bg-gradient-to-b from-white to-[#f7fbfd] shadow-[0_8px_22px_rgba(38,83,109,.05)] sm:rounded-[18px]">
+                    <div className="flex items-center justify-between gap-2 border-b border-[#edf4f8] bg-white/70 px-3 py-2.5 sm:px-4">
+                      <p className="eyebrow text-[#288bab]">Manual grade override</p>
+                      {selectedRecord.originalGrade && selectedRecord.originalGrade !== selectedRecord.grade ? (
+                        <span data-testid="badge-overridden" className="flex shrink-0 items-center gap-1 rounded-full bg-[#fff7ec] px-2 py-0.5 text-[7px] font-extrabold uppercase tracking-[.08em] text-[#b98a49] sm:text-[8px]"><PenLine size={10} /> Overridden</span>
+                      ) : (
+                        <span className="shrink-0 rounded-full bg-[#f1f5f9] px-2 py-0.5 text-[7px] font-extrabold uppercase tracking-[.08em] text-[#94a3b8] sm:text-[8px]">As captured</span>
+                      )}
+                    </div>
+                    <div className="p-3 sm:p-4">
+                      {/* Current grade */}
+                      <div className="flex items-center justify-between rounded-xl border border-[#e6eff4] bg-white px-3 py-2">
+                        <span className="text-[8px] font-bold uppercase tracking-[.08em] text-[#94a3b8] sm:text-[9px]">Current grade</span>
+                        <span className="flex items-center gap-1.5 text-[10px] font-extrabold text-[#334155] sm:text-[11px]">
+                          <span className="size-2.5 rounded-full" style={{ background: gradeColors[selectedRecord.grade] }} />
+                          {gradeLabels[selectedRecord.grade]}
+                        </span>
+                      </div>
+
+                      {/* Grade buttons */}
+                      <div className="mt-2 grid grid-cols-4 gap-1.5 sm:mt-2.5 sm:gap-2" onMouseLeave={() => setPendingGrade('')}>
+                        {grades.map((grade, index) => {
+                          const active = selectedRecord.grade === grade;
+                          return (
+                            <button
+                              type="button"
+                              key={grade}
+                              data-testid={`button-override-${grade.toLowerCase()}`}
+                              disabled={active || overriding}
+                              onClick={() => onOverrideGrade(selectedRecord.id, grade)}
+                              onMouseEnter={() => setPendingGrade(active ? '' : grade)}
+                              onFocus={() => setPendingGrade(active ? '' : grade)}
+                              onBlur={() => setPendingGrade('')}
+                              className={`focus-ring group relative flex min-h-[56px] flex-col items-center justify-center gap-1 rounded-[12px] border py-2 text-center transition disabled:cursor-default ${active ? 'border-transparent text-white shadow-[0_6px_14px_rgba(38,83,109,.16)]' : 'border-[#d8e6ed] bg-white hover:-translate-y-0.5 hover:border-[#7dc8e1] hover:shadow-[0_8px_18px_rgba(38,83,109,.09)] disabled:hover:translate-y-0 disabled:hover:shadow-none disabled:opacity-50'}`}
+                              style={active ? { background: gradeColors[grade] } : undefined}
+                            >
+                              {active && <Check size={12} className="absolute right-1.5 top-1.5" />}
+                              <span className={`mono absolute left-1.5 top-1 text-[8px] font-medium ${active ? 'text-white/60' : 'text-[#c3d2db]'}`}>{index + 1}</span>
+                              {!active && <span className="size-2 rounded-full" style={{ background: gradeColors[grade] }} />}
+                              <span className={`text-[11px] font-extrabold ${active ? '' : 'text-[#3d5a6e]'}`}>{grade === 'Invalid' ? 'Inv' : grade}</span>
+                              <span className={`text-[6px] font-bold uppercase tracking-[.06em] ${active ? 'text-white/70' : 'text-[#9fb3bf]'}`}>{active ? 'current' : 'override'}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Live rename preview */}
+                      <div className="mt-2 flex items-start gap-1.5 rounded-lg border border-[#eef4f8] bg-white px-2 py-1.5" data-testid="preview-rename">
+                        {pendingGrade ? (
+                          <>
+                            <FileImage size={12} className="mt-0.5 shrink-0 text-[#2aa4ce]" />
+                            <p className="min-w-0 break-all font-mono text-[8px] leading-4 text-[#36576c] sm:text-[9px]">
+                              Renames to <span className="font-bold">{buildFilename(selectedRecord.site, selectedRecord.sampleType, pendingGrade, selectedRecord.sequence, selectedRecord.date)}</span>
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <Info size={12} className="mt-0.5 shrink-0 text-[#a5bac6]" />
+                            <p className="text-[8px] leading-4 text-[#9fb3bf] sm:text-[9px]">Hover a grade to preview the new filename — the tally and folders update too.</p>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Revert / audit line */}
+                      {selectedRecord.originalGrade && selectedRecord.originalGrade !== selectedRecord.grade && (
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#f8fafc] px-2.5 py-2">
+                          <p className="text-[8px] font-bold text-[#94a3b8] sm:text-[9px]">
+                            Originally {gradeLabels[selectedRecord.originalGrade]} · overridden {selectedRecord.overriddenAt ? new Date(selectedRecord.overriddenAt).toLocaleString() : ''}
+                          </p>
                           <button
                             type="button"
-                            key={grade}
-                            data-testid={`button-override-${grade.toLowerCase()}`}
-                            disabled={active || overriding}
-                            onClick={() => onOverrideGrade(selectedRecord.id, grade)}
-                            className={`focus-ring flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-[12px] border py-1.5 text-center transition disabled:cursor-default ${active ? 'border-transparent text-white shadow-[0_6px_14px_rgba(38,83,109,.16)]' : 'border-[#d8e6ed] bg-white hover:-translate-y-0.5 hover:border-[#7dc8e1] disabled:opacity-50'}`}
-                            style={active ? { background: gradeColors[grade] } : undefined}
+                            data-testid="button-revert-grade"
+                            disabled={overriding}
+                            onClick={() => onOverrideGrade(selectedRecord.id, selectedRecord.originalGrade!)}
+                            className="focus-ring flex shrink-0 items-center gap-1 rounded-lg border border-[#e2e8f0] bg-white px-2 py-1 text-[8px] font-extrabold text-[#527084] transition hover:bg-[#f8fafc] disabled:opacity-50 sm:text-[9px]"
                           >
-                            <span className="flex items-center gap-1 text-[10px] font-extrabold">
-                              {active && <Check size={12} />}
-                              {grade === 'Invalid' ? 'Inv' : grade}
-                            </span>
-                            <span className={`text-[7px] font-bold uppercase tracking-[.06em] ${active ? 'text-white/75' : 'text-[#94a3b8]'}`}>{grade === 'Invalid' ? 'bad' : 'grade'}</span>
+                            <RotateCcw size={10} /> Revert
                           </button>
-                        );
-                      })}
+                        </div>
+                      )}
                     </div>
-                    {selectedRecord.originalGrade && selectedRecord.originalGrade !== selectedRecord.grade && (
-                      <p className="mt-2 rounded-lg bg-[#f8fafc] px-2 py-1.5 text-[8px] font-bold text-[#94a3b8] sm:text-[9px]">
-                        Originally {gradeLabels[selectedRecord.originalGrade]} · overridden {selectedRecord.overriddenAt ? new Date(selectedRecord.overriddenAt).toLocaleString() : ''}
-                      </p>
-                    )}
                   </div>
 
                   <div className="rounded-[16px] border border-[#ececec] bg-white p-3 sm:rounded-[18px] sm:p-4">

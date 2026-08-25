@@ -75,8 +75,18 @@ button:disabled { cursor: not-allowed; }
    Layout
    ═══════════════════════════════════════════════════════════════════════════ */
 
-.app-shell { min-height: 100dvh; padding: 18px; }
-.dashboard-frame { max-width: 1580px; margin: 0 auto; }
+.app-shell { position: relative; min-height: 100dvh; padding: 18px; }
+.dashboard-frame { position: relative; z-index: 1; max-width: 1580px; margin: 0 auto; }
+
+/* Soft ambient light behind the whole dashboard */
+.ambient-orb {
+  position: fixed;
+  z-index: 0;
+  border-radius: 999px;
+  filter: blur(80px);
+  opacity: .5;
+  pointer-events: none;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Typography & Tokens
@@ -114,6 +124,51 @@ button:disabled { cursor: not-allowed; }
 .export-card {
   background:
     linear-gradient(180deg, rgba(255,255,255,.98), rgba(241,249,253,.9));
+}
+.import-dropzone {
+  outline: 2px dashed transparent;
+  outline-offset: -6px;
+  transition: outline-color .18s ease, box-shadow .18s ease;
+}
+.import-dropzone-active {
+  outline: 2px dashed #56b8dc;
+  outline-offset: -6px;
+  background: linear-gradient(145deg, rgba(233,248,253,.98), rgba(224,243,251,.92)) !important;
+  box-shadow:
+    0 14px 34px rgba(42, 130, 170, .14),
+    inset 0 0 0 1px rgba(86, 184, 220, .35);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Compact Action Buttons
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #d9e7ef;
+  border-radius: 12px;
+  background: rgba(255,255,255,.85);
+  padding: 10px 6px;
+  font-weight: 800;
+  color: #4c6b7f;
+  white-space: nowrap;
+  transition: transform .16s ease, box-shadow .16s ease, background-color .16s ease, border-color .16s ease;
+}
+.action-btn:hover:not(:disabled) {
+  background: #fff;
+  border-color: #b9d8e6;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(38, 83, 109, .08);
+}
+.action-btn:disabled { opacity: .45; }
+.action-btn-accent { color: #257d9f; border-color: #cfe6f0; }
+.action-btn-violet { color: #766587; border-color: #e2dfe8; }
+
+@media (max-width: 767px) {
+  .action-btn { padding: 9px 4px; font-size: 9px; border-radius: 10px; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -249,6 +304,16 @@ button:disabled { cursor: not-allowed; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes statusBreathe { 0%,100% { opacity: .75; } 50% { opacity: 1; } }
 @keyframes scanLine { 0%,100% { transform: translateY(-72px); opacity: 0; } 18%,70% { opacity: .6; } 88% { transform: translateY(72px); opacity: 0; } }
+@keyframes popIn { from { opacity: 0; transform: translateY(10px) scale(.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+.pop-in { animation: popIn .32s cubic-bezier(.34, 1.45, .64, 1) both; }
+
+/* Live view polish */
+.live-dot { animation: livePulse 1.6s ease-in-out infinite; }
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(41, 182, 133, .5); }
+  60% { box-shadow: 0 0 0 6px rgba(41, 182, 133, 0); }
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Safe area for iOS notch / home bar
