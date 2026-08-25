@@ -55,6 +55,18 @@ export async function putRecord(record: RecordItem, image: Blob) {
   }
 }
 
+/** Update record metadata (e.g. a grade override) without touching the stored image. */
+export async function updateRecord(record: RecordItem) {
+  const db = await openDb();
+  try {
+    const tx = db.transaction(RECORDS_STORE, 'readwrite');
+    tx.objectStore(RECORDS_STORE).put(record);
+    await completeTransaction(tx, () => undefined);
+  } finally {
+    db.close();
+  }
+}
+
 export async function removeRecord(id: string) {
   const db = await openDb();
   try {

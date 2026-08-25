@@ -10,7 +10,7 @@ export async function pickSessionFolder(): Promise<FileSystemDirectoryHandle | n
 
     // Second attempt: completely bare call as last fallback
     try {
-      return await window.showDirectoryPicker({ mode: 'readwrite' } as DirectoryPickerOptions);
+      return await window.showDirectoryPicker({ mode: 'readwrite' });
     } catch (retryError) {
       if (retryError instanceof DOMException && retryError.name === 'AbortError') throw retryError;
       throw new FolderAccessError(

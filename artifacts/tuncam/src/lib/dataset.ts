@@ -10,6 +10,9 @@ export type RecordItem = {
   grade: Grade;
   sequence: number;
   createdAt: string;
+  /** Present when the grade was manually overridden during review. */
+  originalGrade?: Grade;
+  overriddenAt?: string;
 };
 
 export type SessionSettings = {

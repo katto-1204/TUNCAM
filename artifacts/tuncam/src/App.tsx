@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   AlertTriangle, Aperture, Archive, BadgeCheck, Camera, Check, ChevronDown, ChevronLeft, CircleAlert,
-  ClipboardList, CloudOff, Download, FileImage, FolderOpen, Gauge, HardDrive,
+  ClipboardList, CloudOff, Download, FileImage, FileUp, FolderOpen, Gauge, HardDrive,
   Image as ImageIcon, Info, Keyboard, MonitorDown, Pause, Plus, RefreshCw,
   ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2,
   Undo2, Upload, UserRound, Video, X, Zap,
@@ -16,7 +16,8 @@ import {
   type Grade, type RecordItem, type SampleType, type SessionSettings, triggerDownload,
 } from '@/lib/dataset';
 import { deleteRelativeFile, ensureFolderPermission, FolderAccessError, pickSessionFolder, writeRelativeFile } from '@/lib/local-folder';
-import { clearSession, getAllImages, getImage, listRecords, loadDirectoryHandle, migrateLegacyRecords, putRecord, removeRecord, saveDirectoryHandle } from '@/lib/session-store';
+import { importSessionZip } from '@/lib/session-import';
+import { clearSession, getAllImages, getImage, listRecords, loadDirectoryHandle, migrateLegacyRecords, putRecord, removeRecord, saveDirectoryHandle, updateRecord } from '@/lib/session-store';
 import { buildZip, type ZipEntry } from '@/lib/zip';
 
 const queryClient = new QueryClient();
@@ -62,6 +63,8 @@ function Tuncam() {
   const [isShortcutOpen, setIsShortcutOpen] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isOverriding, setIsOverriding] = useState(false);
   const [isAwake, setIsAwake] = useState(false);
   const [wakeSupport, setWakeSupport] = useState<'unknown' | 'supported' | 'unsupported'>('unknown');
   const [storageStatus, setStorageStatus] = useState<{ used?: number; quota?: number; low: boolean }>({ low: false });
@@ -76,6 +79,7 @@ function Tuncam() {
   const toastId = useRef(1);
   const previewUrls = useRef<Record<string, string>>({});
   const cameraTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const notify = useCallback((message: string, tone: ToastItem['tone'] = 'info') => {
     const id = toastId.current++;
@@ -467,6 +471,33 @@ function Tuncam() {
     }
   };
 
+  const overrideGrade = async (id: string, nextGrade: Grade) => {
+    const record = records.find((item) => item.id === id);
+    if (!record || record.grade === nextGrade || isOverriding) return;
+    setIsOverriding(true);
+    try {
+      const updated: RecordItem = {
+        ...record,
+        grade: nextGrade,
+        filename: buildFilename(record.site, record.sampleType, nextGrade, record.sequence, record.date),
+        originalGrade: record.originalGrade ?? record.grade,
+        overriddenAt: new Date().toISOString(),
+      };
+      await updateRecord(updated);
+      const image = await getImage(id);
+      if (folderRef.current) {
+        await deleteRelativeFile(folderRef.current, recordPath(record));
+        if (image?.size) await writeRelativeFile(folderRef.current, recordPath(updated), image);
+      }
+      setRecords((current) => current.map((item) => (item.id === id ? updated : item)));
+      notify(`${record.filename} regraded to ${gradeLabels[nextGrade]}.`, 'success');
+    } catch {
+      notify('Could not change the grade of that capture.', 'error');
+    } finally {
+      setIsOverriding(false);
+    }
+  };
+
   const exportManifest = (format: 'csv' | 'json') => {
     const content = format === 'json' ? manifestJson(records, settings) : manifestCsv(records, settings);
     triggerDownload(new Blob([content], { type: format === 'json' ? 'application/json' : 'text/csv' }), `tuncam-${today()}-manifest.${format}`);
@@ -513,6 +544,47 @@ function Tuncam() {
       notify('Photo download failed. Try exporting CSV/JSON, then retry the ZIP.', 'warning');
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || isImporting) return;
+    setIsImporting(true);
+    notify(`Reading "${file.name}"…`, 'info');
+    try {
+      const result = await importSessionZip(file, records);
+      if (!result.added.length) {
+        notify(result.duplicates ? 'Nothing new to import — every photo already exists on this device.' : 'No importable photos were found in that ZIP.', 'warning');
+      } else {
+        setRecords((current) => [...result.added, ...current].sort((a, b) => b.sequence - a.sequence));
+        for (const record of result.added) {
+          const image = result.images.get(record.id);
+          if (image?.size) rememberPreview(record.id, URL.createObjectURL(image));
+        }
+        if (folderRef.current) {
+          try {
+            const allowed = await ensureFolderPermission(folderRef.current);
+            if (allowed) {
+              for (const record of result.added) {
+                const image = result.images.get(record.id);
+                if (image?.size) await writeRelativeFile(folderRef.current, recordPath(record), image);
+              }
+            }
+          } catch {
+            notify('Imported to browser storage but could not copy into the chosen folder.', 'warning');
+          }
+        }
+        const parts = [`Imported ${result.added.length} photo${result.added.length === 1 ? '' : 's'}`];
+        if (result.duplicates) parts.push(`${result.duplicates} duplicate${result.duplicates === 1 ? '' : 's'} skipped`);
+        if (result.missingImages) parts.push(`${result.missingImages} entr${result.missingImages === 1 ? 'y had no' : 'ies had no'} image`);
+        notify(`${parts.join(' · ')}.`, 'success');
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Import failed — that ZIP could not be read.', 'error');
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -747,7 +819,9 @@ function Tuncam() {
             <div className="grid grid-cols-2 gap-2">
               <button type="button" data-testid="button-open-review" onClick={() => setIsReviewOpen(true)} className="focus-ring flex items-center justify-center gap-1.5 rounded-xl border border-[#d5e5ed] bg-white/80 py-2.5 text-[9px] font-extrabold text-[#4c6b7f] hover:bg-white sm:gap-2 sm:py-3 sm:text-[10px]"><ImageIcon size={14} /> Review <span className="rounded-full bg-[#eaf4f8] px-1.5 py-0.5 text-[8px] text-[#4182a1] sm:text-[9px]">{records.length}</span></button>
               <button type="button" data-testid="button-end-session" onClick={() => setIsEndOpen(true)} className="focus-ring flex items-center justify-center gap-1.5 rounded-xl border border-[#e2dfe8] bg-white/80 py-2.5 text-[9px] font-extrabold text-[#766587] hover:bg-white sm:gap-2 sm:py-3 sm:text-[10px]"><Archive size={14} /> End session</button>
+              <button type="button" data-testid="button-import-data" disabled={isImporting} onClick={() => importInputRef.current?.click()} className="focus-ring col-span-2 flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#b9d8e6] bg-[#f4fafd] py-2 text-[9px] font-extrabold text-[#257d9f] hover:bg-[#e9f6fb] disabled:opacity-50 sm:gap-2 sm:py-2.5 sm:text-[10px]"><FileUp size={14} />{isImporting ? 'Importing session…' : 'Import session ZIP from another laptop'}</button>
             </div>
+            <input ref={importInputRef} type="file" accept=".zip,application/zip,application/x-zip-compressed" className="hidden" onChange={(event) => void handleImportFile(event)} data-testid="input-import-zip" />
 
             {/* Download panel */}
             <DownloadPanel
@@ -793,7 +867,7 @@ function Tuncam() {
 
       {/* ─── MODALS ─── */}
       {isGradeOpen && <GradeModal image={capturedPreview} error={gradeError} onSelect={(grade) => void finalizeGrade(grade)} onCancel={discardCapture} />}
-      {isReviewOpen && <ReviewModal records={records} previews={previews} exporting={isExporting} onClose={() => setIsReviewOpen(false)} onDelete={(id) => void deleteRecord(id)} onExport={exportManifest} onDownload={() => void exportDataset()} />}
+      {isReviewOpen && <ReviewModal records={records} previews={previews} exporting={isExporting} overriding={isOverriding} onClose={() => setIsReviewOpen(false)} onDelete={(id) => void deleteRecord(id)} onOverrideGrade={(id, grade) => void overrideGrade(id, grade)} onExport={exportManifest} onDownload={() => void exportDataset()} />}
       {isEndOpen && <EndModal records={records} settings={settings} exporting={isExporting} onClose={() => setIsEndOpen(false)} onConfirmEnd={handleConfirmEndSession} onExport={exportManifest} onDownload={handleEndSession} />}
       {isSettingsOpen && <ToolsModal settings={settings} onClose={() => setIsSettingsOpen(false)} onInstall={installPrompt ? installApp : undefined} />}
       {isShortcutOpen && <ShortcutModal onClose={() => setIsShortcutOpen(false)} />}
@@ -839,6 +913,7 @@ function RecordThumbnail({ record, previewUrl }: { record: RecordItem; previewUr
       });
       return () => { active = false; };
     }
+    return undefined;
   }, [record.id, url, error]);
 
   if (error || !url) {
@@ -1018,7 +1093,7 @@ function GradeModal({ image, error, onSelect, onCancel }: { image?: string; erro
   );
 }
 
-function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport, onDownload }: { records: RecordItem[]; previews: Record<string, string>; exporting: boolean; onClose: () => void; onDelete: (id: string) => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
+function ReviewModal({ records, previews, exporting, overriding, onClose, onDelete, onOverrideGrade, onExport, onDownload }: { records: RecordItem[]; previews: Record<string, string>; exporting: boolean; overriding: boolean; onClose: () => void; onDelete: (id: string) => void; onOverrideGrade: (id: string, grade: Grade) => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
   const [selectedId, setSelectedId] = useState('');
   const [gradeFilter, setGradeFilter] = useState<Grade | 'All'>('All');
 
@@ -1151,11 +1226,43 @@ function ReviewModal({ records, previews, exporting, onClose, onDelete, onExport
 
                 <div className="space-y-3">
                   <div className="rounded-[16px] border border-[#ececec] bg-white p-3 sm:rounded-[18px] sm:p-4">
+                    <p className="eyebrow text-[#94a3b8]">Manual grade override</p>
+                    <p className="mt-1 text-[9px] leading-4 text-[#94a3b8] sm:text-[10px]">Review the photo, then override the expert grade. The filename, tally and folders update automatically.</p>
+                    <div className="mt-2 grid grid-cols-4 gap-1.5 sm:mt-2.5 sm:gap-2">
+                      {grades.map((grade) => {
+                        const active = selectedRecord.grade === grade;
+                        return (
+                          <button
+                            type="button"
+                            key={grade}
+                            data-testid={`button-override-${grade.toLowerCase()}`}
+                            disabled={active || overriding}
+                            onClick={() => onOverrideGrade(selectedRecord.id, grade)}
+                            className={`focus-ring flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-[12px] border py-1.5 text-center transition disabled:cursor-default ${active ? 'border-transparent text-white shadow-[0_6px_14px_rgba(38,83,109,.16)]' : 'border-[#d8e6ed] bg-white hover:-translate-y-0.5 hover:border-[#7dc8e1] disabled:opacity-50'}`}
+                            style={active ? { background: gradeColors[grade] } : undefined}
+                          >
+                            <span className="flex items-center gap-1 text-[10px] font-extrabold">
+                              {active && <Check size={12} />}
+                              {grade === 'Invalid' ? 'Inv' : grade}
+                            </span>
+                            <span className={`text-[7px] font-bold uppercase tracking-[.06em] ${active ? 'text-white/75' : 'text-[#94a3b8]'}`}>{grade === 'Invalid' ? 'bad' : 'grade'}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedRecord.originalGrade && selectedRecord.originalGrade !== selectedRecord.grade && (
+                      <p className="mt-2 rounded-lg bg-[#f8fafc] px-2 py-1.5 text-[8px] font-bold text-[#94a3b8] sm:text-[9px]">
+                        Originally {gradeLabels[selectedRecord.originalGrade]} · overridden {selectedRecord.overriddenAt ? new Date(selectedRecord.overriddenAt).toLocaleString() : ''}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="rounded-[16px] border border-[#ececec] bg-white p-3 sm:rounded-[18px] sm:p-4">
                     <p className="eyebrow text-[#94a3b8]">Capture info</p>
                     <div className="mt-2 grid gap-2 sm:mt-3">
                       {[
                         { label: 'Sample type', value: selectedRecord.sampleType },
-                        { label: 'Grade', value: gradeLabels[selectedRecord.grade] },
+                        { label: 'Current grade', value: gradeLabels[selectedRecord.grade] },
                         { label: 'Collection site', value: selectedRecord.site },
                         { label: 'Capture date', value: selectedRecord.date },
                         { label: 'Sequence', value: String(selectedRecord.sequence).padStart(3, '0') },
