@@ -1,0 +1,12 @@
+{
+  "model": "openrouter/stealth/ox-alpha",
+  "provider": {
+    "openrouter": {
+      "models": {
+        "stealth/ox-alpha": {
+          "name": "Ox Alpha"
+        }
+      }
+    }
+  }
+}

@@ -5,7 +5,7 @@ import {
   ClipboardList, CloudOff, Download, FileImage, FileUp, FolderOpen, Gauge, HardDrive,
   Image as ImageIcon, Info, Keyboard, LaptopMinimal, Loader2, MonitorDown, Pause, PenLine, Plus, RefreshCw, RotateCcw,
   ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2,
-  Undo2, Upload, UserRound, Video, X, Zap,
+  Undo2, Upload, UserRound, Video, X, Zap, ArrowLeftRight,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -22,6 +22,7 @@ import { buildZip, type ZipEntry } from '@/lib/zip';
 
 const queryClient = new QueryClient();
 const SETTINGS_KEY = 'tuncam-session-settings-v1';
+const PREVIEW_STORAGE_KEY = 'tuncam-preview-urls-v1';
 const CAMERA_TIMEOUT_MS = 12_000;
 
 type CameraState = 'idle' | 'loading' | 'ready' | 'denied' | 'missing' | 'timeout';
@@ -65,6 +66,7 @@ function Tuncam() {
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isOverriding, setIsOverriding] = useState(false);
+  const [isTypeOverriding, setIsTypeOverriding] = useState(false);
   const [importDragOver, setImportDragOver] = useState(false);
   const [lastImport, setLastImport] = useState<{ name: string; added: number; duplicates: number; missingImages: number } | null>(null);
   const [isAwake, setIsAwake] = useState(false);
@@ -93,6 +95,11 @@ function Tuncam() {
     if (previewUrls.current[id]) URL.revokeObjectURL(previewUrls.current[id]);
     previewUrls.current[id] = url;
     setPreviews({ ...previewUrls.current });
+    try {
+      localStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(previewUrls.current));
+    } catch {
+      /* localStorage not available */
+    }
   }, []);
 
   const forgetPreview = useCallback((id: string) => {
@@ -100,6 +107,11 @@ function Tuncam() {
       URL.revokeObjectURL(previewUrls.current[id]);
       delete previewUrls.current[id];
       setPreviews({ ...previewUrls.current });
+      try {
+        localStorage.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(previewUrls.current));
+      } catch {
+        /* localStorage not available */
+      }
     }
   }, []);
 
@@ -184,6 +196,16 @@ function Tuncam() {
     'Sashibo Core': records.filter((record) => record.sampleType === 'Sashibo Core').length,
     'Tail-Cut': records.filter((record) => record.sampleType === 'Tail-Cut').length,
   }), [records]);
+  const gradeCountsByType = useMemo(() => {
+    const result: Record<string, Record<Grade, number>> = {};
+    ['Sashibo Core', 'Tail-Cut'].forEach(type => {
+      result[type] = grades.reduce((all, grade) => {
+        all[grade] = records.filter((record) => record.sampleType === type && record.grade === grade).length;
+        return all;
+      }, {} as Record<Grade, number>);
+    });
+    return result;
+  }, [records]);
   const latestRecord = records[0];
   const readyToCapture = Boolean(settings.site && settings.operator.trim() && settings.grader.trim() && settings.sampleType && cameraState === 'ready' && videoReady);
   const currentSequence = records.length ? Math.max(...records.map((record) => record.sequence)) + 1 : 1;
@@ -211,6 +233,19 @@ function Tuncam() {
         if (!active) return;
         for (const [id, blob] of images) {
           if (blob.size) rememberPreview(id, URL.createObjectURL(blob));
+        }
+        // Restore preview URLs from localStorage as backup
+        try {
+          const storedPreviewUrls = localStorage.getItem(PREVIEW_STORAGE_KEY);
+          if (storedPreviewUrls) {
+            const parsed = JSON.parse(storedPreviewUrls);
+            // Revoke any existing object URLs that are being replaced
+            Object.values(previewUrls.current).forEach((url) => URL.revokeObjectURL(url));
+            previewUrls.current = parsed;
+            setPreviews(parsed);
+          }
+        } catch {
+          // localStorage might not be available in some contexts
         }
       } catch {
         if (active) notify('Could not restore previous captures from this device.', 'warning');
@@ -341,10 +376,11 @@ function Tuncam() {
 
   const finalizeGrade = useCallback(async (grade: Grade) => {
     if (isSavingGrade) return;
-    if (!settings.sampleType) {
+    if (!settings.sampleType && !settings.sampleTypeOverride) {
       setGradeError('No sample type selected. Go back and pick Sashibo Core or Tail-Cut.');
       return;
     }
+    const effectiveSampleType = (settings.sampleTypeOverride || settings.sampleType) as SampleType;
     if (!capturedBlob) {
       setGradeError('Capture failed — the image was not saved in memory. Press Discard and try capturing again.');
       return;
@@ -354,10 +390,10 @@ function Tuncam() {
     const sequence = currentSequence;
     const record: RecordItem = {
       id: `${Date.now()}-${sequence}`,
-      filename: buildFilename(settings.site, settings.sampleType, grade, sequence, date),
+      filename: buildFilename(settings.site, effectiveSampleType, grade, sequence, date),
       date,
       site: settings.site,
-      sampleType: settings.sampleType,
+      sampleType: effectiveSampleType,
       grade,
       sequence,
       createdAt: new Date().toISOString(),
@@ -497,6 +533,49 @@ function Tuncam() {
       notify('Could not change the grade of that capture.', 'error');
     } finally {
       setIsOverriding(false);
+    }
+  };
+
+  const overrideSampleType = async (id: string, nextSampleType: SampleType) => {
+    const record = records.find((item) => item.id === id);
+    if (!record || record.sampleType === nextSampleType || isTypeOverriding) return;
+    setIsTypeOverriding(true);
+    try {
+      const updated: RecordItem = {
+        ...record,
+        sampleType: nextSampleType,
+        filename: buildFilename(record.site, nextSampleType, record.grade, record.sequence, record.date),
+        originalSampleType: record.originalSampleType ?? record.sampleType,
+        overriddenAt: new Date().toISOString(),
+      };
+      await updateRecord(updated);
+      const image = await getImage(id);
+      if (folderRef.current) {
+        await deleteRelativeFile(folderRef.current, recordPath(record));
+        if (image?.size) await writeRelativeFile(folderRef.current, recordPath(updated), image);
+      }
+      setRecords((current) => current.map((item) => (item.id === id ? updated : item)));
+      notify(`${record.filename} re-typed to ${nextSampleType}.`, 'success');
+    } catch {
+      notify('Could not change the sample type of that capture.', 'error');
+    } finally {
+      setIsTypeOverriding(false);
+    }
+  };
+
+  const updateAnnotation = async (id: string, annotations: string[]) => {
+    const record = records.find((item) => item.id === id);
+    if (!record) return;
+    try {
+      const updated: RecordItem = {
+        ...record,
+        annotations: annotations.length > 0 ? annotations : undefined,
+      };
+      await updateRecord(updated);
+      setRecords((current) => current.map((item) => (item.id === id ? updated : item)));
+      notify('Annotation updated.', 'success');
+    } catch {
+      notify('Could not update the annotation.', 'error');
     }
   };
 
@@ -682,6 +761,8 @@ function Tuncam() {
       setPreviews({});
       setRecords([]);
       setIsEndOpen(false);
+      // Clear preview URLs from localStorage
+      try { localStorage.removeItem(PREVIEW_STORAGE_KEY); } catch { /* ignore */ }
       notify('Session ended. Dataset exported and storage cleared for next session.', 'success');
     } catch {
       notify('Could not clear session data completely.', 'error');
@@ -694,7 +775,7 @@ function Tuncam() {
       <div aria-hidden className="ambient-orb" style={{ width: 400, height: 400, bottom: -160, left: -150, background: 'radial-gradient(circle, rgba(72,196,235,.32), transparent 70%)' }} />
       <main className="dashboard-frame">
         {/* ─── HEADER ─── */}
-        <header className="glass-card flex min-h-[56px] items-center justify-between gap-3 rounded-[18px] px-3 py-2.5 sm:min-h-[68px] sm:rounded-[22px] sm:px-4 sm:py-3 md:px-6">
+        <header className="glass-card flex min-h-14 items-center justify-between gap-3 rounded-[18px] px-3 py-2.5 sm:min-h-17 sm:rounded-[22px] sm:px-4 sm:py-3 md:px-6">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <div className="blue-sheen flex size-8 shrink-0 items-center justify-center rounded-[12px] text-white shadow-[0_8px_18px_rgba(22,132,221,.25)] sm:size-10 sm:rounded-[14px]"><Aperture size={18} strokeWidth={2.3} /></div>
             <div className="min-w-0">
@@ -743,6 +824,15 @@ function Tuncam() {
               <label><span className="field-label">Expert grader <span className="text-[#d87871]">*</span></span><div className="relative"><BadgeCheck className="field-icon" size={15} /><input data-testid="input-grader-name" value={settings.grader} onChange={(event) => setSettings({ ...settings, grader: event.target.value })} className="field-control with-icon" placeholder="Who is grading?" autoComplete="name" /></div></label>
               <label><span className="field-label">Storage location</span><button type="button" data-testid="button-choose-folder" onClick={() => void chooseFolder()} className="focus-ring flex h-10 w-full items-center gap-2 rounded-xl border border-[#d5e5ee] bg-[#f7fbfd] px-3 text-left text-[11px] text-[#557187] hover:border-[#7bc7e5]"><FolderOpen size={15} className="shrink-0 text-[#319ccc]" /><span className="min-w-0 flex-1 truncate">{folderChosen ? settings.storage : 'Choose any folder…'}</span><ChevronDown size={14} className="text-[#9ab1c0]" /></button></label>
               <div><span className="field-label">Sample type <span className="text-[#d87871]">*</span></span><div className="grid grid-cols-2 gap-2"><SampleOption value="Sashibo Core" selected={settings.sampleType === 'Sashibo Core'} onClick={() => setSettings({ ...settings, sampleType: 'Sashibo Core' })} code="SC" /><SampleOption value="Tail-Cut" selected={settings.sampleType === 'Tail-Cut'} onClick={() => setSettings({ ...settings, sampleType: 'Tail-Cut' })} code="TC" /></div></div>
+              {settings.sampleType && (
+                <div className="mt-2">
+                  <span className="field-label">Type override</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setSettings({ ...settings, sampleTypeOverride: 'Sashibo Core' })} className={`focus-ring rounded-xl border p-2 text-left transition sm:p-2.5 ${settings.sampleTypeOverride === 'Sashibo Core' ? 'border-[#53b9df] bg-[#e9f8fc] shadow-[0_4px_12px_rgba(47,163,207,.1)]' : 'border-[#d9e6ed] bg-white/60 hover:bg-white'}`}><div className="flex items-center justify-between"><span className={`flex size-5 items-center justify-center rounded-lg text-[8px] font-extrabold sm:size-6 sm:text-[9px] ${settings.sampleTypeOverride === 'Sashibo Core' ? 'blue-sheen text-white' : 'bg-[#eaf2f6] text-[#658196]'}`}>SC</span>{settings.sampleTypeOverride === 'Sashibo Core' && <Check size={13} className="text-[#1a9bcb]" />}</div><p className="mt-1.5 text-[9px] font-extrabold text-[#47647a] sm:mt-2 sm:text-[10px]">Sashibo Core</p></button>
+                    <button type="button" onClick={() => setSettings({ ...settings, sampleTypeOverride: 'Tail-Cut' })} className={`focus-ring rounded-xl border p-2 text-left transition sm:p-2.5 ${settings.sampleTypeOverride === 'Tail-Cut' ? 'border-[#53b9df] bg-[#e9f8fc] shadow-[0_4px_12px_rgba(47,163,207,.1)]' : 'border-[#d9e6ed] bg-white/60 hover:bg-white'}`}><div className="flex items-center justify-between"><span className={`flex size-5 items-center justify-center rounded-lg text-[8px] font-extrabold sm:size-6 sm:text-[9px] ${settings.sampleTypeOverride === 'Tail-Cut' ? 'blue-sheen text-white' : 'bg-[#eaf2f6] text-[#658196]'}`}>TC</span>{settings.sampleTypeOverride === 'Tail-Cut' && <Check size={13} className="text-[#1a9bcb]" />}</div><p className="mt-1.5 text-[9px] font-extrabold text-[#47647a] sm:mt-2 sm:text-[10px]">Tail-Cut</p></button>
+                  </div>
+                </div>
+              )}
             </div>
             {/* Ready / Not-ready status */}
             <div className={`mt-3 rounded-[14px] border px-3 py-2 sm:mt-4 sm:rounded-[15px] sm:py-2.5 ${readyToCapture ? 'border-[#bde7da] bg-[#f0fbf7]' : 'border-[#e2edf2] bg-[#f8fbfc]'}`}>
@@ -773,10 +863,10 @@ function Tuncam() {
               </div>
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <button type="button" data-testid="button-refresh-camera" onClick={() => { setSelectedDevice(''); void connectCamera(''); }} className="focus-ring flex size-8 items-center justify-center rounded-lg border border-[#dce9ef] bg-white/80 text-[#6e899b] hover:text-[#3658c4]" aria-label="Connect or refresh camera"><RefreshCw size={14} /></button>
-                <select data-testid="select-camera-device" value={selectedDevice} onChange={(event) => { const deviceId = event.target.value; setSelectedDevice(deviceId); void connectCamera(deviceId); }} className="h-8 max-w-[120px] rounded-lg border border-[#dce9ef] bg-white/80 px-2 text-[10px] text-[#587185] sm:max-w-[140px]" aria-label="Camera device"><option value="">Default camera</option>{devices.map((device, index) => <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}</select>
+                <select data-testid="select-camera-device" value={selectedDevice} onChange={(event) => { const deviceId = event.target.value; setSelectedDevice(deviceId); void connectCamera(deviceId); }} className="h-8 max-w-30 rounded-lg border border-[#dce9ef] bg-white/80 px-2 text-[10px] text-[#587185] sm:max-w-35" aria-label="Camera device"><option value="">Default camera</option>{devices.map((device, index) => <option key={device.deviceId || index} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}</select>
               </div>
             </div>
-            <div className={`relative aspect-[16/10] min-h-[200px] overflow-hidden rounded-[16px] bg-[#dce9ee] sm:min-h-[290px] sm:rounded-[22px] ${isCapturing ? 'capture-pulse' : ''}`}>
+            <div className={`relative aspect-16/10 min-h-50 overflow-hidden rounded-2xl bg-[#dce9ee] sm:min-h-72.5 sm:rounded-[22px] ${isCapturing ? 'capture-pulse' : ''}`}>
               {cameraState === 'ready' ? <video ref={videoRef} muted playsInline onLoadedMetadata={() => setVideoReady(true)} className="absolute inset-0 size-full object-cover" data-testid="video-camera-preview" /> : <CameraEmpty state={cameraState} issue={cameraIssue} onRetry={() => void connectCamera()} />}
               {cameraState === 'ready' && (
                 <>
@@ -798,7 +888,7 @@ function Tuncam() {
             {/* Desktop capture controls (hidden on mobile — mobile uses sticky bottom bar) */}
             <div className="mt-2 hidden grid-cols-[1fr_auto_1fr] items-center gap-3 sm:mt-3 md:grid">
               <div className="flex items-center gap-2"><div className="rounded-lg bg-[#eaf5fa] p-2 text-[#3b9fca]"><ScanLine size={15} /></div><div><p className="text-[10px] font-bold text-[#4b687d]">Framing guide only</p><p className="text-[9px] text-[#8ca1af]">Capture happens when you press the button</p></div></div>
-              <button type="button" data-testid="button-capture" disabled={!readyToCapture} onClick={captureFrame} className={`capture-button focus-ring group relative flex h-[56px] min-w-[170px] items-center justify-center gap-3 rounded-[18px] px-4 text-white transition hover:-translate-y-0.5 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 lg:h-[64px] lg:min-w-[190px] lg:rounded-[20px] lg:px-5 ${readyToCapture ? 'blue-sheen' : 'bg-[#afc6d2]'}`}><span className="flex size-8 items-center justify-center rounded-xl border border-white/30 bg-white/15 lg:size-9"><Camera size={18} /></span><span className="text-left"><span className="block text-[11px] font-extrabold lg:text-[12px]">Capture sample</span><span className="mono block text-[8px] opacity-80 lg:text-[9px]">SPACEBAR</span></span></button>
+              <button type="button" data-testid="button-capture" disabled={!readyToCapture} onClick={captureFrame} className={`capture-button focus-ring group relative flex h-14 min-w-42.5 items-center justify-center gap-3 rounded-[18px] px-4 text-white transition hover:-translate-y-0.5 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 lg:h-16 lg:min-w-47.5 lg:rounded-[20px] lg:px-5 ${readyToCapture ? 'blue-sheen' : 'bg-[#afc6d2]'}`}><span className="flex size-8 items-center justify-center rounded-xl border border-white/30 bg-white/15 lg:size-9"><Camera size={18} /></span><span className="text-left"><span className="block text-[11px] font-extrabold lg:text-[12px]">Capture sample</span><span className="mono block text-[8px] opacity-80 lg:text-[9px]">SPACEBAR</span></span></button>
               <div className="flex justify-end"><button type="button" data-testid="button-undo-last" disabled={!records.length} onClick={() => void undoLast()} className="action-btn focus-ring px-3 py-2.5 text-[10px]"><Undo2 size={14} /> Undo last</button></div>
             </div>
             {!readyToCapture && <p className="mt-2 text-center text-[9px] text-[#8aa0ae] sm:text-[10px]">Press Connect camera, fill the required fields, pick a sample type, then capture manually.</p>}
@@ -813,9 +903,29 @@ function Tuncam() {
               <div className="mt-2 flex items-center justify-between border-t border-[#e6eef3] pt-2 sm:mt-3 sm:pt-3"><span className="text-[10px] font-bold text-[#577286] sm:text-[11px]">Total captured</span><span data-testid="text-total-captured" className="mono text-[16px] font-medium text-[#1c75ac] sm:text-[18px]">{records.length.toString().padStart(3, '0')}</span></div>
               {latestRecord && <div className="mt-2 rounded-2xl border border-[#d7e8f3] bg-white/70 p-2.5 sm:mt-3 sm:p-3"><p className="eyebrow">Last capture</p><p className="mt-1 truncate font-mono text-[10px] font-extrabold text-[#36576c] sm:text-[11px]">{jpegFilename(latestRecord)}</p><p className="mt-1 text-[9px] text-[#7f95a5] sm:text-[10px]">{latestRecord.sampleType} · {gradeLabels[latestRecord.grade]}</p></div>}
             </div>
+            <div className="mt-3">
+              {(['Sashibo Core', 'Tail-Cut'] as const).map((type) => {
+                const typeInvalidCount = gradeCountsByType[type]?.Invalid ?? 0;
+                const typeTotal = typeCounts[type];
+                return (
+                  <div key={type} className="soft-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="eyebrow">Session pulse</p>
+                        <h2 className="mt-1 text-[13px] font-extrabold tracking-[-.03em] text-[#203c53] sm:text-[15px]">Today's tally</h2>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[9px] font-bold text-[#577286]">{typeInvalidCount} Invalid</span>
+                        <span className="text-[8px] text-[#7f95a5]">of {typeTotal}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
 
             {/* Progress */}
-            <div className="soft-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4"><div className="flex items-center justify-between"><div><p className="eyebrow">Progress / target 800</p><p className="mt-1 text-[11px] font-bold text-[#426278] sm:text-[12px]">Class balance</p></div><SlidersHorizontal size={16} className="text-[#78a1b7]" /></div><div className="mt-2 space-y-2 sm:mt-3 sm:space-y-3">{(['Sashibo Core', 'Tail-Cut'] as SampleType[]).map((type) => <div key={type}><div className="mb-1 flex items-center justify-between text-[9px] sm:mb-1.5 sm:text-[10px]"><span className="font-bold text-[#5c7587]">{type}</span><span className="mono text-[#849aa8]">{typeCounts[type]} / 3,200</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#e5eff4] sm:h-2"><div className="h-full rounded-full bg-gradient-to-r from-[#39b9e7] to-[#4a78df] transition-all duration-500" style={{ width: `${Math.min(100, typeCounts[type] / 32)}%` }} /></div></div>)}</div></div>
+            <div className="soft-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4"><div className="flex items-center justify-between"><div><p className="eyebrow">Progress / target 800</p><p className="mt-1 text-[11px] font-bold text-[#426278] sm:text-[12px]">Class balance</p></div><SlidersHorizontal size={16} className="text-[#78a1b7]" /></div><div className="mt-2 space-y-2 sm:mt-3 sm:space-y-3">{(['Sashibo Core', 'Tail-Cut'] as SampleType[]).map((type) => <div key={type}><div className="mb-1 flex items-center justify-between text-[9px] sm:mb-1.5 sm:text-[10px]"><span className="font-bold text-[#5c7587]">{type}</span><span className="mono text-[#849aa8]">{typeCounts[type]} / 3,200</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#e5eff4] sm:h-2"><div className="h-full rounded-full bg-linear-to-r from-[#39b9e7] to-[#4a78df] transition-all duration-500" style={{ width: `${Math.min(100, typeCounts[type] / 32)}%` }} /></div></div>)}</div></div>
 
             {/* Storage */}
             <div className="soft-card rounded-[18px] p-3 sm:rounded-[22px] sm:p-4"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><HardDrive size={16} className={storageStatus.low ? 'text-[#d8796e]' : 'text-[#3c9cbb]'} /><span className="text-[10px] font-extrabold text-[#466479] sm:text-[11px]">Local storage</span></div><span className={`rounded-full px-2 py-1 text-[8px] font-bold sm:text-[9px] ${storageStatus.low ? 'bg-[#fff0ed] text-[#bd685f]' : 'bg-[#ebf8f4] text-[#2e8c70]'}`}>{storageStatus.low ? 'Review soon' : 'Healthy'}</span></div><p className="mt-1.5 text-[9px] leading-4 text-[#8499a8] sm:mt-2 sm:text-[10px]">{storageStatus.quota ? `${formatBytes(storageStatus.used || 0)} used of ${formatBytes(storageStatus.quota)} browser quota.` : 'Browser storage estimate will appear when supported.'}</p>{storageStatus.quota ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#e5eff4]" data-testid="bar-storage-usage"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, ((storageStatus.used || 0) / storageStatus.quota) * 100)}%`, background: storageStatus.low ? 'linear-gradient(90deg,#f0a28e,#d8776f)' : 'linear-gradient(90deg,#39b9e7,#4a78df)' }} /></div> : null}{storageStatus.low && <div className="mt-2 flex gap-2 rounded-lg bg-[#fff5f1] p-2 text-[9px] text-[#ae6259] sm:text-[10px]"><CircleAlert size={14} className="shrink-0" /> Download the photos ZIP and copy it to a backup drive.</div>}</div>
@@ -855,7 +965,7 @@ function Tuncam() {
           data-testid="button-capture-mobile"
           disabled={!readyToCapture}
           onClick={captureFrame}
-          className={`capture-button focus-ring flex h-[48px] min-w-[140px] items-center justify-center gap-2 rounded-[16px] px-4 text-white transition disabled:cursor-not-allowed disabled:opacity-45 ${readyToCapture ? 'blue-sheen' : 'bg-[#afc6d2]'}`}
+          className={`capture-button focus-ring flex h-12 min-w-35 items-center justify-center gap-2 rounded-2xl px-4 text-white transition disabled:cursor-not-allowed disabled:opacity-45 ${readyToCapture ? 'blue-sheen' : 'bg-[#afc6d2]'}`}
         >
           <Camera size={18} />
           <span className="text-[12px] font-extrabold">Capture</span>
@@ -873,7 +983,7 @@ function Tuncam() {
 
       {/* ─── MODALS ─── */}
       {isGradeOpen && <GradeModal image={capturedPreview} error={gradeError} onSelect={(grade) => void finalizeGrade(grade)} onCancel={discardCapture} />}
-      {isReviewOpen && <ReviewModal records={records} previews={previews} exporting={isExporting} overriding={isOverriding} onClose={() => setIsReviewOpen(false)} onDelete={(id) => void deleteRecord(id)} onOverrideGrade={(id, grade) => void overrideGrade(id, grade)} onExport={exportManifest} onDownload={() => void exportDataset()} />}
+      {isReviewOpen && <ReviewModal records={records} previews={previews} exporting={isExporting} overriding={isOverriding} onClose={() => setIsReviewOpen(false)} onDelete={(id) => void deleteRecord(id)} onOverrideGrade={(id, grade) => void overrideGrade(id, grade)} onAnnotationUpdate={(id, annotations) => void updateAnnotation(id, annotations)} onTypeOverride={(id, sampleType) => void overrideSampleType(id, sampleType)} onExport={exportManifest} onDownload={() => void exportDataset()} />}
       {isEndOpen && <EndModal records={records} settings={settings} exporting={isExporting} onClose={() => setIsEndOpen(false)} onConfirmEnd={handleConfirmEndSession} onExport={exportManifest} onDownload={handleEndSession} />}
       {isSettingsOpen && <ToolsModal settings={settings} onClose={() => setIsSettingsOpen(false)} onInstall={installPrompt ? installApp : undefined} />}
       {isShortcutOpen && <ShortcutModal onClose={() => setIsShortcutOpen(false)} />}
@@ -1030,7 +1140,7 @@ function FilenamePreview({ name }: { name: string }) {
   const grade = segments[5] || 'GRD_A';
   const seq = segments[6] || '001';
   return (
-    <div className="filename-chip mt-2 rounded-[14px] border border-[#d4e6f0] bg-white/85 p-2.5 sm:mt-3 sm:rounded-[16px] sm:p-3">
+    <div className="filename-chip mt-2 rounded-[14px] border border-[#d4e6f0] bg-white/85 p-2.5 sm:mt-3 sm:rounded-2xl sm:p-3">
       <p className="break-all font-mono text-[11px] font-bold leading-5 text-[#214e69] sm:text-[12px]">{name}</p>
       <div className="mt-1.5 flex flex-wrap gap-1 sm:mt-2">
         {[
@@ -1074,7 +1184,7 @@ function CameraEmpty({ state, issue, onRetry }: { state: CameraState; issue?: st
 
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_50%_36%,#eef2ff,#dce4f7)]">
-      <div className="max-w-[320px] px-4 text-center">
+      <div className="max-w-80 px-4 text-center">
         <div className={`mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl border border-white/80 bg-white/70 shadow-sm sm:size-14 ${isError ? 'text-[#c75a50]' : 'text-[#3f5fd0]'}`}>
           {state === 'loading' ? <RefreshCw className="animate-spin" size={22} /> : isError ? <AlertTriangle size={22} /> : <Video size={22} />}
         </div>
@@ -1085,7 +1195,7 @@ function CameraEmpty({ state, issue, onRetry }: { state: CameraState; issue?: st
             type="button"
             data-testid="button-camera-retry"
             onClick={onRetry}
-            className="focus-ring mt-3 rounded-lg bg-gradient-to-r from-[#5278ec] to-[#274bc2] px-4 py-2 text-[10px] font-extrabold text-white shadow-[0_8px_18px_rgba(45,76,196,.2)] sm:py-2.5"
+            className="focus-ring mt-3 rounded-lg bg-linear-to-r from-[#5278ec] to-[#274bc2] px-4 py-2 text-[10px] font-extrabold text-white shadow-[0_8px_18px_rgba(45,76,196,.2)] sm:py-2.5"
           >
             {state === 'idle' ? 'Connect camera' : 'Try camera again'}
           </button>
@@ -1098,8 +1208,8 @@ function CameraEmpty({ state, issue, onRetry }: { state: CameraState; issue?: st
 function GradeModal({ image, error, onSelect, onCancel }: { image?: string; error?: string; onSelect: (grade: Grade) => void; onCancel: () => void }) {
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-[#18354a]/50 p-0 backdrop-blur-md sm:items-center sm:p-4">
-      <div className="modal-in flex max-h-[95dvh] w-full flex-col overflow-hidden rounded-t-[24px] border border-white/80 bg-[#f9fcfd] shadow-[0_30px_90px_rgba(20,58,86,.32)] sm:max-w-[640px] sm:rounded-[24px]">
-        <div className="relative flex items-start justify-between border-b border-[#e4edf2] bg-gradient-to-r from-white/90 to-[#f2f9fc] px-4 py-3 sm:px-5 sm:py-4 md:px-6">
+      <div className="modal-in flex max-h-[95dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-white/80 bg-[#f9fcfd] shadow-[0_30px_90px_rgba(20,58,86,.32)] sm:max-w-160 sm:rounded-3xl">
+        <div className="relative flex items-start justify-between border-b border-[#e4edf2] bg-linear-to-r from-white/90 to-[#f2f9fc] px-4 py-3 sm:px-5 sm:py-4 md:px-6">
           <div>
             <p className="eyebrow text-[#288bab]">Capture held · label required</p>
             <h2 className="mt-1 text-[17px] font-extrabold tracking-[-.04em] text-[#1f3c52] sm:text-[20px]">How would you grade this sample?</h2>
@@ -1128,7 +1238,7 @@ function GradeModal({ image, error, onSelect, onCancel }: { image?: string; erro
                   key={grade}
                   data-testid={`button-grade-${grade.toLowerCase()}`}
                   onClick={() => onSelect(grade)}
-                  className="focus-ring flex min-h-[60px] items-center justify-between gap-3 rounded-[14px] border border-[#e2e8f0] bg-white px-3 py-2.5 text-left transition-colors hover:border-[#9fc6d8] hover:bg-[#f7fbfd] sm:min-h-[68px] sm:px-4"
+                  className="focus-ring flex min-h-15 items-center justify-between gap-3 rounded-[14px] border border-[#e2e8f0] bg-white px-3 py-2.5 text-left transition-colors hover:border-[#9fc6d8] hover:bg-[#f7fbfd] sm:min-h-17 sm:px-4"
                 >
                   <span className="flex items-center gap-2.5">
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-lg text-[12px] font-extrabold text-white sm:size-8" style={{ background: gradeColors[grade] }}>{grade === 'Invalid' ? '!' : grade}</span>
@@ -1149,7 +1259,7 @@ function GradeModal({ image, error, onSelect, onCancel }: { image?: string; erro
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-[#e4edf2] bg-gradient-to-r from-[#f0f6f9] to-[#f7fafc] px-4 py-2.5 text-[9px] text-[#78909e] sm:px-5 sm:py-3 sm:text-[10px] md:px-6">
+        <div className="flex items-center justify-between border-t border-[#e4edf2] bg-linear-to-r from-[#f0f6f9] to-[#f7fafc] px-4 py-2.5 text-[9px] text-[#78909e] sm:px-5 sm:py-3 sm:text-[10px] md:px-6">
           <span className="hidden items-center gap-2 sm:flex"><Zap size={13} className="text-[#2aa4ce]" /> Keyboard ready: 1 / 2 / 3 / 4</span>
           <span className="text-[9px] sm:hidden">Tap a grade to save</span>
           <button type="button" data-testid="button-cancel-capture" onClick={onCancel} className="focus-ring rounded-lg px-2 py-1 font-bold text-[#6d8493] transition hover:bg-white hover:text-[#c75a50]">Discard frame</button>
@@ -1159,9 +1269,10 @@ function GradeModal({ image, error, onSelect, onCancel }: { image?: string; erro
   );
 }
 
-function ReviewModal({ records, previews, exporting, overriding, onClose, onDelete, onOverrideGrade, onExport, onDownload }: { records: RecordItem[]; previews: Record<string, string>; exporting: boolean; overriding: boolean; onClose: () => void; onDelete: (id: string) => void; onOverrideGrade: (id: string, grade: Grade) => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
+function ReviewModal({ records, previews, exporting, overriding, onClose, onDelete, onOverrideGrade, onAnnotationUpdate, onExport, onDownload, onTypeOverride }: { records: RecordItem[]; previews: Record<string, string>; exporting: boolean; overriding: boolean; onClose: () => void; onDelete: (id: string) => void; onOverrideGrade: (id: string, grade: Grade) => void; onAnnotationUpdate: (id: string, annotations: string[]) => void; onTypeOverride: (id: string, sampleType: SampleType) => void; onExport: (format: 'csv' | 'json') => void; onDownload: () => void }) {
   const [selectedId, setSelectedId] = useState('');
   const [gradeFilter, setGradeFilter] = useState<Grade | 'All'>('All');
+  const [sampleTypeFilter, setSampleTypeFilter] = useState<'Sashibo Core' | 'Tail-Cut' | 'All'>('All');
   const [pendingGrade, setPendingGrade] = useState<Grade | ''>('');
 
   const gradeCounts = useMemo(() => {
@@ -1171,9 +1282,11 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
   }, [records]);
 
   const filteredRecords = useMemo(() => {
-    if (gradeFilter === 'All') return records;
-    return records.filter((record) => record.grade === gradeFilter);
-  }, [records, gradeFilter]);
+    if (gradeFilter === 'All' && sampleTypeFilter === 'All') return records;
+    if (gradeFilter === 'All') return records.filter((record) => record.sampleType === sampleTypeFilter);
+    if (sampleTypeFilter === 'All') return records.filter((record) => record.grade === gradeFilter);
+    return records.filter((record) => record.sampleType === sampleTypeFilter && record.grade === gradeFilter);
+  }, [records, gradeFilter, sampleTypeFilter]);
 
   useEffect(() => {
     if (selectedId && !records.some((record) => record.id === selectedId)) {
@@ -1199,6 +1312,9 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
     return () => window.removeEventListener('keydown', handleModalKey, { capture: true });
   }, [inDetail]);
 
+  const [annotationId, setAnnotationOpen] = useState('');
+  const annotationRecord = annotationId ? records.find((record) => record.id === annotationId) : undefined;
+
   const handleDelete = (id: string) => {
     onDelete(id);
     if (selectedId === id) setSelectedId('');
@@ -1206,7 +1322,7 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
 
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/40 p-0 backdrop-blur-[2px] sm:items-center sm:p-3 md:p-4">
-      <div className="review-modal modal-in flex max-h-[100dvh] w-full flex-col overflow-hidden rounded-t-[24px] border border-[#ebebeb] bg-white shadow-[0_24px_80px_rgba(15,23,42,.14)] sm:max-h-[min(900px,94dvh)] sm:max-w-[1180px] sm:rounded-[24px]">
+      <div className="review-modal modal-in flex max-h-dvh w-full flex-col overflow-hidden rounded-t-3xl border border-[#ebebeb] bg-white shadow-[0_24px_80px_rgba(15,23,42,.14)] sm:max-h-[min(900px,94dvh)] sm:max-w-295 sm:rounded-3xl">
         <div className="flex shrink-0 items-center justify-between border-b border-[#f0f0f0] bg-white px-3 py-3 sm:px-4 sm:py-4 md:px-6">
           <div className="min-w-0">
             {inDetail ? (
@@ -1243,7 +1359,7 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
         {!inDetail && records.length > 0 && (
           <div className="review-filters shrink-0 overflow-x-auto border-b border-[#f0f0f0] bg-[#fafafa] px-3 py-2.5 sm:px-4 sm:py-3 md:px-6">
             <div className="flex items-center gap-1.5 sm:flex-wrap sm:gap-2">
-              <span className="mr-1 shrink-0 text-[8px] font-bold uppercase tracking-[.1em] text-[#94a3b8] sm:text-[9px]">Filter</span>
+              <span className="mr-1 shrink-0 text-[8px] font-bold uppercase tracking-widest text-[#94a3b8] sm:text-[9px]">Filter</span>
               {(['All', ...grades] as const).map((filter) => {
                 const active = gradeFilter === filter;
                 const label = filter === 'All' ? 'All' : filter === 'Invalid' ? 'Inv' : `${filter}`;
@@ -1266,27 +1382,43 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
                   </button>
                 );
               })}
+              <span className="ml-2 shrink-0 text-[8px] font-bold uppercase tracking-widest text-[#94a3b8] sm:text-[9px]">Type</span>
+              {(['All', 'Sashibo Core', 'Tail-Cut'] as const).map((type) => {
+                const active = sampleTypeFilter === type;
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    data-testid={`filter-type-${type.toLowerCase()}`}
+                    onClick={() => setSampleTypeFilter(type)}
+                    className={`focus-ring review-filter-pill shrink-0 ${active ? 'review-filter-pill-active' : ''} ${type === 'All' ? '' : 'ml-2'}`}
+                  >
+                    <span className="sm:hidden">{type}</span>
+                    <span className="hidden sm:inline">{type}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+<div className="min-h-0 flex-1 overflow-y-auto">
           {!records.length ? (
-            <div className="flex min-h-[260px] flex-col items-center justify-center px-4 py-8 text-center sm:min-h-[320px] sm:px-6 sm:py-12">
+            <div className="flex min-h-65 flex-col items-center justify-center px-4 py-8 text-center sm:min-h-70 sm:px-6 sm:py-12">
               <div className="mb-3 rounded-2xl bg-[#f8fafc] p-3 text-[#64748b] sm:p-4"><Archive size={24} /></div>
               <h3 className="text-[13px] font-extrabold text-[#334155] sm:text-[14px]">Nothing captured yet</h3>
-              <p className="mt-1 max-w-[260px] text-[10px] leading-4 text-[#94a3b8] sm:text-[11px]">Completed samples will appear here for a quick quality check.</p>
+              <p className="mt-1 max-w-65 text-[10px] leading-4 text-[#94a3b8] sm:text-[11px]">Completed samples will appear here for a quick quality check.</p>
             </div>
           ) : inDetail && selectedRecord ? (
             <div className="p-3 sm:p-4 md:p-6">
               <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.2fr)_340px]">
                 <div>
-                  <div className="overflow-hidden rounded-[16px] border border-[#ececec] bg-[#fafafa] p-2 sm:rounded-[20px] sm:p-2.5">
-                    <div className="aspect-[4/3] w-full overflow-hidden rounded-[12px] sm:rounded-[14px]">
+                  <div className="overflow-hidden rounded-2xl border border-[#ececec] bg-[#fafafa] p-2 sm:rounded-[20px] sm:p-2.5">
+                    <div className="aspect-4/3 w-full overflow-hidden rounded-[12px] sm:rounded-[14px]">
                       <RecordThumbnail record={selectedRecord} previewUrl={previews[selectedRecord.id]} />
                     </div>
                   </div>
-                  <div className="mt-3 rounded-[16px] border border-[#ececec] bg-white p-3 sm:mt-4 sm:rounded-[18px] sm:p-4">
+                  <div className="mt-3 rounded-2xl border border-[#ececec] bg-white p-3 sm:mt-4 sm:rounded-[18px] sm:p-4">
                     <p className="eyebrow text-[#94a3b8]">Filename</p>
                     <p className="mt-1.5 break-all font-mono text-[11px] font-bold leading-5 text-[#1e293b] sm:mt-2 sm:text-[12px] md:text-[13px]">{jpegFilename(selectedRecord)}</p>
                     <p className="mt-1.5 text-[9px] leading-5 text-[#94a3b8] sm:mt-2 sm:text-[10px]">
@@ -1296,7 +1428,7 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
                 </div>
 
                 <div className="space-y-3">
-                  <div className="overflow-hidden rounded-[16px] border border-[#e3edf3] bg-gradient-to-b from-white to-[#f7fbfd] shadow-[0_8px_22px_rgba(38,83,109,.05)] sm:rounded-[18px]">
+                  <div className="overflow-hidden rounded-2xl border border-[#e3edf3] bg-linear-to-b from-white to-[#f7fbfd] shadow-[0_8px_22px_rgba(38,83,109,.05)] sm:rounded-[18px]">
                     <div className="flex items-center justify-between gap-2 border-b border-[#edf4f8] bg-white/70 px-3 py-2.5 sm:px-4">
                       <p className="eyebrow text-[#288bab]">Manual grade override</p>
                       {selectedRecord.originalGrade && selectedRecord.originalGrade !== selectedRecord.grade ? (
@@ -1308,12 +1440,12 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
                     <div className="p-3 sm:p-4">
                       {/* Current grade */}
                       <div className="flex items-center justify-between rounded-xl border border-[#e6eff4] bg-white px-3 py-2">
-                        <span className="text-[8px] font-bold uppercase tracking-[.08em] text-[#94a3b8] sm:text-[9px]">Current grade</span>
-                        <span className="flex items-center gap-1.5 text-[10px] font-extrabold text-[#334155] sm:text-[11px]">
-                          <span className="size-2.5 rounded-full" style={{ background: gradeColors[selectedRecord.grade] }} />
-                          {gradeLabels[selectedRecord.grade]}
-                        </span>
-                      </div>
+        <span className="text-[8px] font-bold uppercase tracking-[.08em] text-[#94a3b8] sm:text-[9px]">Current grade</span>
+        <span className="flex items-center gap-1.5 text-[10px] font-extrabold text-[#334155] sm:text-[11px]">
+          <span className="size-2.5 rounded-full" style={{ background: gradeColors[selectedRecord.grade] }} />
+          {gradeLabels[selectedRecord.grade]}
+        </span>
+      </div>
 
                       {/* Grade buttons */}
                       <div className="mt-2 grid grid-cols-4 gap-1.5 sm:mt-2.5 sm:gap-2" onMouseLeave={() => setPendingGrade('')}>
@@ -1329,8 +1461,8 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
                               onMouseEnter={() => setPendingGrade(active ? '' : grade)}
                               onFocus={() => setPendingGrade(active ? '' : grade)}
                               onBlur={() => setPendingGrade('')}
-                              className={`focus-ring group relative flex min-h-[56px] flex-col items-center justify-center gap-1 rounded-[12px] border py-2 text-center transition disabled:cursor-default ${active ? 'border-transparent text-white shadow-[0_6px_14px_rgba(38,83,109,.16)]' : 'border-[#d8e6ed] bg-white hover:-translate-y-0.5 hover:border-[#7dc8e1] hover:shadow-[0_8px_18px_rgba(38,83,109,.09)] disabled:hover:translate-y-0 disabled:hover:shadow-none disabled:opacity-50'}`}
-                              style={active ? { background: gradeColors[grade] } : undefined}
+                              className={`focus-ring group relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-[12px] border py-2 text-center transition disabled:cursor-default ${active ? 'border-transparent text-white shadow-[0_6px_14px_rgba(38,83,109,.16)]' : 'border-[#d8e6ed] bg-white hover:-translate-y-0.5 hover:border-[#7dc8e1] hover:shadow-[0_8px_18px_rgba(38,83,109,.09)] disabled:hover:translate-y-0 disabled:hover:shadow-none disabled:opacity-50'}`}
+                            style={active ? { background: gradeColors[grade] } : undefined}
                             >
                               {active && <Check size={12} className="absolute right-1.5 top-1.5" />}
                               <span className={`mono absolute left-1.5 top-1 text-[8px] font-medium ${active ? 'text-white/60' : 'text-[#c3d2db]'}`}>{index + 1}</span>
@@ -1379,7 +1511,7 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
                     </div>
                   </div>
 
-                  <div className="rounded-[16px] border border-[#ececec] bg-white p-3 sm:rounded-[18px] sm:p-4">
+                  <div className="rounded-2xl border border-[#ececec] bg-white p-3 sm:rounded-[18px] sm:p-4">
                     <p className="eyebrow text-[#94a3b8]">Capture info</p>
                     <div className="mt-2 grid gap-2 sm:mt-3">
                       {[
@@ -1395,6 +1527,40 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
                           <p className="mt-0.5 text-[10px] font-extrabold text-[#334155] sm:mt-1 sm:text-[11px]">{item.value}</p>
                         </div>
                       ))}
+{selectedRecord.annotations && selectedRecord.annotations.length > 0 && (
+                        <div key="annotations" className="rounded-xl border border-[#e6f7ff] bg-[#f0f7ff] px-3 py-2">
+                          <p className="text-[8px] font-bold uppercase tracking-[.06em] text-[#2185ae] mb-1">Annotations</p>
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {selectedRecord.annotations.map((annotation, idx) => (
+                              <div key={idx} className="flex items-center gap-2 px-2 py-1 rounded bg-white text-[9px] text-[#47647a]">
+                                <span className="flex-1 break-all">{annotation}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => onAnnotationUpdate!(selectedRecord.id, selectedRecord.annotations!.filter((_, i) => i !== idx))}
+                                  className="text-[#888888] hover:text-[#c75a50]"><X size={12} /></button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div className="mt-2">
+                        {selectedRecord.sampleType && (
+                          <button
+                            type="button"
+                            onClick={() => onTypeOverride(selectedRecord.id, selectedRecord.sampleType === 'Sashibo Core' ? 'Tail-Cut' : 'Sashibo Core')}
+                            className="focus-ring rounded-lg border border-[#d4e6ed] bg-white/80 px-3 py-1.5 text-[9px] font-bold text-[#527084] hover:bg-[#eef4ff] sm:py-2 sm:text-[10px]"
+                          >
+                            <ArrowLeftRight size={13} /> Override type to {selectedRecord.sampleType === 'Sashibo Core' ? 'Tail-Cut' : 'Sashibo Core'}
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAnnotationOpen(selectedRecord.id)}
+                        className="mt-2 rounded-lg border border-[#d4e6ed] bg-white/80 px-3 py-1.5 text-[9px] font-bold text-[#527084] hover:bg-[#eef4ff] sm:py-2 sm:text-[10px]"
+                      >
+                        <PenLine size={13} /> Add annotation
+                      </button>
                     </div>
                   </div>
 
@@ -1402,7 +1568,7 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
                     type="button"
                     data-testid={`button-delete-record-${selectedRecord.id}`}
                     onClick={() => handleDelete(selectedRecord.id)}
-                    className="focus-ring flex w-full items-center justify-center gap-2 rounded-[14px] border border-[#f0d4c2] bg-[#fff7f1] px-4 py-2.5 text-[10px] font-extrabold text-[#b0634f] hover:bg-[#fff2ea] sm:rounded-[16px] sm:py-3 sm:text-[11px]"
+                    className="focus-ring flex w-full items-center justify-center gap-2 rounded-[14px] border border-[#f0d4c2] bg-[#fff7f1] px-4 py-2.5 text-[10px] font-extrabold text-[#b0634f] hover:bg-[#fff2ea] sm:rounded-2xl sm:py-3 sm:text-[11px]"
                   >
                     <Trash2 size={15} /> Delete this capture
                   </button>
@@ -1413,7 +1579,7 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
             <div className="review-gallery space-y-4 p-3 sm:space-y-5 sm:p-4 md:p-6">
               {(['Sashibo Core', 'Tail-Cut'] as SampleType[]).map((type) => {
                 const typeRecords = filteredRecords.filter((record) => record.sampleType === type);
-                if (!typeRecords.length && gradeFilter !== 'All') return null;
+                if (!typeRecords.length && (gradeFilter !== 'All' || sampleTypeFilter !== 'All')) return null;
                 const folderName = type === 'Sashibo Core' ? 'Sashibo-Core' : 'Tail-Cut';
                 return (
                   <div key={type} className="rounded-[18px] border border-[#e3edf3] bg-[#f8fbfc] p-3 sm:p-4">
@@ -1464,10 +1630,10 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
               })}
             </div>
           ) : (
-            <div className="flex min-h-[240px] flex-col items-center justify-center px-4 py-8 text-center sm:min-h-[280px] sm:px-6 sm:py-12">
+            <div className="flex min-h-60 flex-col items-center justify-center px-4 py-8 text-center sm:min-h-70 sm:px-6 sm:py-12">
               <div className="mb-3 rounded-2xl bg-[#f8fafc] p-3 text-[#94a3b8] sm:p-4"><SlidersHorizontal size={24} /></div>
               <h3 className="text-[13px] font-extrabold text-[#334155] sm:text-[14px]">No samples in this filter</h3>
-              <p className="mt-1 max-w-[240px] text-[10px] leading-4 text-[#94a3b8] sm:text-[11px]">Try another grade or switch back to All.</p>
+              <p className="mt-1 max-w-60 text-[10px] leading-4 text-[#94a3b8] sm:text-[11px]">Try another grade or switch back to All.</p>
               <button type="button" onClick={() => setGradeFilter('All')} className="focus-ring mt-4 rounded-lg border border-[#e2e8f0] bg-white px-4 py-2 text-[10px] font-bold text-[#475569] hover:bg-[#f8fafc]">
                 Show all captures
               </button>
@@ -1492,6 +1658,14 @@ function ReviewModal({ records, previews, exporting, overriding, onClose, onDele
           </div>
         </div>
       </div>
+      {annotationRecord && (
+        <AnnotationModal
+          recordId={annotationRecord.id}
+          annotations={annotationRecord.annotations ?? []}
+          onSave={(list) => { onAnnotationUpdate(annotationRecord.id, list); setAnnotationOpen(''); }}
+          onClose={() => setAnnotationOpen('')}
+        />
+      )}
     </div>
   );
 }
@@ -1510,12 +1684,12 @@ function EndModal({ records, settings, exporting, onClose, onConfirmEnd, onExpor
 
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center bg-[#18354a]/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="modal-in flex max-h-[95dvh] w-full flex-col overflow-hidden rounded-t-[24px] border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.24)] sm:max-w-[560px] sm:rounded-[26px]">
+      <div className="modal-in flex max-h-[95dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.24)] sm:max-w-140 sm:rounded-[26px]">
         <div className="blue-sheen p-4 text-white sm:p-6">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-[9px] font-bold uppercase tracking-[.14em] text-white/70 sm:text-[10px]">Session wrap</p>
-              <h2 className="mt-1.5 text-[20px] font-extrabold tracking-[-.05em] sm:mt-2 sm:text-[25px]">Secure the day's work.</h2>
+              <h2 className="mt-1.5 text-[20px] font-extrabold tracking-tighter sm:mt-2 sm:text-[25px]">Secure the day's work.</h2>
               <p className="mt-1 text-[10px] text-white/75 sm:text-[11px]">
                 {exporting ? 'Exporting your session…' : autoExportDone ? 'ZIP downloaded automatically! Extract it, then browse the folders.' : 'Download the ZIP, extract it, then browse tuncam / date-place / sample type / grade for the photos.'}
               </p>
@@ -1564,7 +1738,7 @@ function EndModal({ records, settings, exporting, onClose, onConfirmEnd, onExpor
             type="button"
             data-testid="button-confirm-end-session"
             onClick={onConfirmEnd}
-            className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#214e69] to-[#16384d] py-3 text-[11px] font-extrabold text-white shadow-[0_8px_20px_rgba(25,58,82,.24)] transition hover:from-[#1b4259] hover:to-[#102b3c] sm:py-3.5 sm:text-[12px]"
+            className="focus-ring flex w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#214e69] to-[#16384d] py-3 text-[11px] font-extrabold text-white shadow-[0_8px_20px_rgba(25,58,82,.24)] transition hover:from-[#1b4259] hover:to-[#102b3c] sm:py-3.5 sm:text-[12px]"
           >
             <Check size={16} /> CONFIRM END SESSION & CLEAR
           </button>
@@ -1585,7 +1759,7 @@ function EndModal({ records, settings, exporting, onClose, onConfirmEnd, onExpor
 function ToolsModal({ settings, onClose, onInstall }: { settings: SessionSettings; onClose: () => void; onInstall?: () => Promise<void> }) {
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center bg-[#18354a]/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="modal-in w-full max-h-[90dvh] overflow-y-auto rounded-t-[24px] border border-white/70 bg-[#f9fcfd] p-4 shadow-[0_25px_80px_rgba(20,58,86,.24)] sm:max-w-[460px] sm:rounded-[24px] sm:p-6">
+      <div className="modal-in w-full max-h-dvh overflow-y-auto rounded-t-3xl border border-white/70 bg-[#f9fcfd] p-4 shadow-[0_25px_80px_rgba(20,58,86,.24)] sm:max-w-115 sm:rounded-3xl sm:p-6">
         <div className="flex items-start justify-between">
           <div><p className="eyebrow">Session tools</p><h2 className="mt-1 text-[17px] font-extrabold text-[#203e54] sm:text-[19px]">Field instrument</h2></div>
           <button type="button" data-testid="button-close-tools" onClick={onClose} className="focus-ring rounded-lg p-2 text-[#78919f] hover:bg-white"><X size={18} /></button>
@@ -1597,6 +1771,52 @@ function ToolsModal({ settings, onClose, onInstall }: { settings: SessionSetting
         </div>
         {onInstall && <button type="button" data-testid="button-install-tools" onClick={onInstall} className="focus-ring mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#e7f6fb] py-2.5 text-[10px] font-extrabold text-[#257d9f] sm:mt-5 sm:py-3 sm:text-[11px]"><Download size={15} /> Install TUNCAM on this device</button>}
         <button type="button" data-testid="button-done-tools" onClick={onClose} className="focus-ring mt-2 w-full rounded-xl bg-[#214e69] py-2.5 text-[10px] font-extrabold text-white sm:py-3 sm:text-[11px]">Done</button>
+      </div>
+    </div>
+  );
+}
+
+function AnnotationModal({ recordId, annotations, onSave, onClose }: { recordId: string; annotations: string[]; onSave: (annotations: string[]) => void; onClose: () => void }) {
+  const [text, setText] = useState<string>('');
+  useEffect(() => {
+    setText(annotations.join(', ') || '');
+  }, [annotations]);
+  return (
+    <div className="fixed inset-0 z-30 flex items-end justify-center bg-[#18354a]/50 p-0 backdrop-blur-md sm:items-center sm:p-4">
+      <div className="modal-in flex max-h-[80dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-white/80 bg-[#f9fcfd] shadow-[0_30px_90px_rgba(20,58,86,.32)] sm:max-w-160 sm:rounded-3xl">
+        <div className="relative flex items-start justify-between border-b border-[#e4edf2] bg-linear-to-r from-white/90 to-[#f2f9fc] px-4 py-3 sm:px-5 sm:py-4 md:px-6">
+          <div>
+            <p className="eyebrow text-[#288bab]">Add annotation</p>
+            <h2 className="mt-1 text-[17px] font-extrabold tracking-[-.04em] text-[#1f3c52] sm:text-[20px]">Annotate this capture</h2>
+            <p className="mt-1 text-[10px] text-[#77909e] sm:text-[11px]">Add free-text notes about this sample.</p>
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-5">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={3}
+            className="w-full border border-[#d1e1e8] rounded-md px-3 py-2 text-[12px] font-medium text-[#1e293b] sm:text-[13px] focus-ring focus:border-[#3b82f6] focus:outline-none resize-none sm:resize-y"
+            placeholder="Enter annotation notes..."
+          /></div>
+
+        <div className="flex items-center justify-between border-t border-[#e4edf2] bg-linear-to-r from-[#f0f6f9] to-[#f7fafc] px-4 py-3 text-[9px] text-[#78909e] sm:px-5 sm:py-3 sm:text-[10px] md:px-6">
+          <button
+            type="button"
+            onClick={() => onSave(text.split(',').map((t) => t.trim()).filter((t) => t.length > 0))}
+            className="focus-ring flex items-center gap-2 rounded-xl bg-[#214e69] py-2.5 text-[9px] font-extrabold text-white disabled:opacity-40 sm:py-3 sm:text-[10px]"
+          >
+            <Check size={14} /> Save
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="focus-ring rounded-lg border border-[#d1e1e8] bg-white py-2.5 text-[9px] font-bold text-[#527084] sm:py-3 sm:text-[10px]"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1615,7 +1835,7 @@ function ShortcutModal({ onClose }: { onClose: () => void }) {
   ];
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center bg-[#18354a]/45 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-      <div className="modal-in flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-t-[24px] border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.24)] sm:max-w-[560px] sm:rounded-[26px]">
+      <div className="modal-in flex max-h-dvh w-full flex-col overflow-hidden rounded-t-3xl border border-white/70 bg-[#f9fcfd] shadow-[0_25px_80px_rgba(20,58,86,.24)] sm:max-w-140 sm:rounded-[26px]">
         <div className="flex items-center justify-between border-b border-[#e1edf2] px-4 py-3 sm:px-5 sm:py-4">
           <div><p className="eyebrow">Keyboard shortcuts</p><h2 className="mt-1 text-[16px] font-extrabold text-[#203e54] sm:text-[18px]">Faster field workflow</h2></div>
           <button type="button" onClick={onClose} className="focus-ring rounded-lg p-2 text-[#78919f] hover:bg-white"><X size={18} /></button>

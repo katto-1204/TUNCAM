@@ -11,9 +11,10 @@
     "artifacts/tuncam"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=@workspace/tuncam",
-    "build": "npm run build --workspace=@workspace/tuncam",
-    "typecheck": "npm run typecheck --workspace=@workspace/tuncam"
+    "dev": "pnpm --filter @workspace/tuncam run dev",
+    "build": "pnpm run typecheck && pnpm -r run build",
+    "typecheck": "pnpm run typecheck:libs && pnpm -r run typecheck",
+    "typecheck:libs": "tsc -b lib/api-zod lib/db && tsc -p lib/api-client-react --noEmit"
   },
   "devDependencies": {
     "prettier": "^3.9.6",

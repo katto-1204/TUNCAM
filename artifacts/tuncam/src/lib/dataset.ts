@@ -12,7 +12,11 @@ export type RecordItem = {
   createdAt: string;
   /** Present when the grade was manually overridden during review. */
   originalGrade?: Grade;
+  /** Present when the sample type was manually overridden during review. */
+  originalSampleType?: SampleType;
   overriddenAt?: string;
+  /** Free-text annotations added during review. */
+  annotations?: string[];
 };
 
 export type SessionSettings = {
@@ -21,6 +25,7 @@ export type SessionSettings = {
   grader: string;
   storage: string;
   sampleType: SampleType | '';
+  sampleTypeOverride?: SampleType | '';
 };
 
 export const grades: Grade[] = ['A', 'B', 'C', 'Invalid'];
