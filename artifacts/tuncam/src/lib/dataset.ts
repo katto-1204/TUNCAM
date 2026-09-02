@@ -1,5 +1,6 @@
 export type SampleType = 'Sashibo Core' | 'Tail-Cut';
 export type Grade = 'A' | 'B' | 'C' | 'Invalid';
+export type CaptureMode = 'standard' | 'rotation';
 
 export type RecordItem = {
   id: string;
@@ -10,12 +11,16 @@ export type RecordItem = {
   grade: Grade;
   sequence: number;
   createdAt: string;
+  /** Standard framing guide vs rotation-pie capture */
+  captureMode?: CaptureMode;
+  /** 1–6 when captured via rotation pie */
+  rotationSide?: number;
   /** Present when the grade was manually overridden during review. */
   originalGrade?: Grade;
   /** Present when the sample type was manually overridden during review. */
   originalSampleType?: SampleType;
   overriddenAt?: string;
-  /** Free-text annotations added during review. */
+  /** Determinant bbox annotations + optional notes */
   annotations?: string[];
 };
 
@@ -36,9 +41,9 @@ export const gradeLabels: Record<Grade, string> = {
   Invalid: 'Invalid',
 };
 export const gradeColors: Record<Grade, string> = {
-  A: '#1594d0',
-  B: '#4d72dc',
-  C: '#8a6bd5',
+  A: '#2563EB',
+  B: '#1E40AF',
+  C: '#6366F1',
   Invalid: '#dc776f',
 };
 
@@ -127,13 +132,32 @@ export function gradeFolder(grade: Grade) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 export const exportRoot = 'tuncam';
+export const rotationPieRoot = 'rotation-pie';
 
 export function sessionFolder(site: string, date = today()) {
   return `${date}-${slug(site)}`;
 }
 
-export function recordFolder(record: Pick<RecordItem, 'date' | 'site' | 'sampleType' | 'grade'>) {
-  return `${exportRoot}/${sessionFolder(record.site, record.date)}/${sampleFolder(record.sampleType)}/${gradeFolder(record.grade)}`;
+export function recordFolder(record: Pick<RecordItem, 'date' | 'site' | 'sampleType' | 'grade' | 'captureMode' | 'rotationSide'>) {
+  const session = sessionFolder(record.site, record.date);
+  const typeFolder = sampleFolder(record.sampleType);
+  const grade = gradeFolder(record.grade);
+  if (record.captureMode === 'rotation') {
+    const side = String(record.rotationSide ?? 1).padStart(2, '0');
+    return `${exportRoot}/${session}/${rotationPieRoot}/Side-${side}/${typeFolder}/${grade}`;
+  }
+  return `${exportRoot}/${session}/${typeFolder}/${grade}`;
+}
+
+/** Infer capture mode from an exported folder path (used when merging ZIPs). */
+export function parseCaptureFromFolder(folder: string): Pick<RecordItem, 'captureMode' | 'rotationSide'> {
+  const normalized = folder.replaceAll('\\', '/');
+  if (!normalized.includes(`/${rotationPieRoot}/`)) return { captureMode: 'standard' };
+  const match = normalized.match(/\/rotation-pie\/Side-(\d{2})\//i);
+  return {
+    captureMode: 'rotation',
+    rotationSide: match ? Number(match[1]) : undefined,
+  };
 }
 
 export function recordPath(record: RecordItem) {
@@ -189,6 +213,10 @@ export function exportGuideText(site: string, sampleName: string, date = today()
     '        GradeB/',
     '        GradeC/',
     '        Invalid/',
+    `      ${rotationPieRoot}/`,
+    '        Side-01/ … Side-06/',
+    '          Sashibo-Core/ or Tail-Cut/',
+    '            GradeA/ … Invalid/',
     '',
     'Each photo lives inside the matching sample type and grade folder.',
     '',
@@ -227,6 +255,8 @@ export function buildManifestRows(records: RecordItem[], settings: SessionSettin
     grade: record.grade,
     grade_code: gradeCode(record.grade),
     sequence: record.sequence,
+    capture_mode: record.captureMode ?? 'standard',
+    rotation_side: record.rotationSide ?? '',
     operator: settings.operator,
     grader: settings.grader,
     folder: recordFolder(record),
@@ -236,9 +266,9 @@ export function buildManifestRows(records: RecordItem[], settings: SessionSettin
 
 export function manifestCsv(records: RecordItem[], settings: SessionSettings) {
   const rows = buildManifestRows(records, settings);
-  const header = 'filename,date,site,site_code,sample_type,sample_code,grade,grade_code,sequence,operator,grader,folder,created_at';
+  const header = 'filename,date,site,site_code,sample_type,sample_code,grade,grade_code,sequence,capture_mode,rotation_side,operator,grader,folder,created_at';
   const body = rows.map((row) =>
-    [row.filename, row.date, row.site, row.site_code, row.sample_type, row.sample_code, row.grade, row.grade_code, row.sequence, row.operator, row.grader, row.folder, row.created_at]
+    [row.filename, row.date, row.site, row.site_code, row.sample_type, row.sample_code, row.grade, row.grade_code, row.sequence, row.capture_mode, row.rotation_side, row.operator, row.grader, row.folder, row.created_at]
       .map((value) => `"${String(value).replaceAll('\r', '').replaceAll('\n', ' ').replaceAll('"', '""')}"`)
       .join(','),
   );

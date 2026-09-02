@@ -1,4 +1,4 @@
-import { buildFilename, grades, jpegFilename, type Grade, type RecordItem, type SampleType } from './dataset';
+import { buildFilename, grades, jpegFilename, parseCaptureFromFolder, type CaptureMode, type Grade, type RecordItem, type SampleType } from './dataset';
 import { getImage, putRecord } from './session-store';
 import { readZipFiles } from './zip-read';
 
@@ -18,7 +18,25 @@ type ManifestRow = {
   sequence?: unknown;
   created_at?: unknown;
   folder?: unknown;
+  capture_mode?: unknown;
+  rotation_side?: unknown;
 };
+
+function resolveCaptureFields(row: ManifestRow, folder: string) {
+  const fromFolder = folder ? parseCaptureFromFolder(folder) : {};
+  const mode = row.capture_mode === 'rotation' ? 'rotation' : row.capture_mode === 'standard' ? 'standard' : fromFolder.captureMode;
+  const captureMode: CaptureMode = mode === 'rotation' ? 'rotation' : 'standard';
+  const rawSide = row.rotation_side;
+  const parsedSide = typeof rawSide === 'number'
+    ? rawSide
+    : typeof rawSide === 'string' && rawSide.trim()
+      ? Number(rawSide)
+      : undefined;
+  const rotationSide = captureMode === 'rotation'
+    ? (parsedSide && parsedSide >= 1 && parsedSide <= 6 ? parsedSide : fromFolder.rotationSide ?? 1)
+    : undefined;
+  return { captureMode, rotationSide };
+}
 
 function crc32(data: Uint8Array) {
   let crc = 0xffffffff;
@@ -119,6 +137,7 @@ export async function importSessionZip(file: File, existing: RecordItem[]): Prom
       grade,
       sequence,
       createdAt: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString(),
+      ...resolveCaptureFields(row, folder),
     };
     await putRecord(record, image);
     usedFilenames.set(filename, record.id);
